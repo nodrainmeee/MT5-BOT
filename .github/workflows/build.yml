@@ -1,0 +1,96 @@
+name: Compilation MonBot
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Récupération du code
+        uses: actions/checkout@v4
+
+      - name: Installation de Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Installation des dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Tests de logique (sans MT5, données simulées)
+        run: python -m pytest -q tests
+
+      - name: Création de l'icône
+        run: python tools/make_icon.py
+
+      - name: Compilation avec PyInstaller (MonBot.exe, sans console)
+        run: >
+          pyinstaller --noconfirm --clean --onedir --windowed
+          --name MonBot
+          --icon assets/icon.ico
+          --add-data "ui;ui"
+          --add-data "assets/icon.ico;assets"
+          --collect-all webview
+          --hidden-import MetaTrader5
+          --hidden-import keyring.backends.Windows
+          --copy-metadata keyring
+          main.py
+
+      - name: Vérification de l'exécutable
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/MonBot/MonBot.exe")) { throw "MonBot.exe introuvable" }
+          Get-Item "dist/MonBot/MonBot.exe" | Format-List Name, Length
+
+      - name: Installation d'Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+
+      - name: Création de l'installateur (Setup.exe)
+        shell: pwsh
+        run: |
+          $version = "0.1.0"
+          if ($env:GITHUB_REF_TYPE -eq "tag") { $version = $env:GITHUB_REF_NAME.TrimStart("v") }
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = "${env:ProgramFiles}\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DMyAppVersion=$version" "installer\MonBot.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Échec d'Inno Setup" }
+
+      - name: Publication de Setup.exe (artefact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: MonBot-Setup
+          path: installer/Output/Setup.exe
+          retention-days: 30
+
+      - name: Publication de la version portable (artefact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: MonBot-portable
+          path: dist/MonBot/
+          retention-days: 30
+
+      - name: Release GitHub (seulement pour un tag vX.Y.Z)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/Output/Setup.exe
+          body: |
+            Installateur de MonBot.
+            Le trading comporte un risque de perte en capital. Aucun gain n'est garanti.
+            Testez d'abord en compte démo pendant 1 à 2 mois.
