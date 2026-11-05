@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 
 from .config import MAGIC_NUMBER, ConfigStore
 from .mt5_connector import DEAL_ENTRY_IN, MT5Connector
-from .risk import RiskManager, compute_lot
+from .risk import LotResult, RiskManager, compute_fixed_money, compute_lot
 from .strategy import (StrategyParams, adjust_distances, evaluate, in_session,
                        spread_is_abnormal)
 
@@ -396,11 +396,30 @@ class TradingEngine:
         solde = float(self._state.get("balance") or 0.0)
         equite = float(self._state.get("equity") or solde)
         capital = min(solde, equite)
-        lot = compute_lot(capital, s.risk_per_trade, perte_lot,
-                          info.volume_min, info.volume_step, info.volume_max)
-        if not lot.ok:
-            self.journal.warning(f"{nom} : {lot.reason}")
-            return False
+        if s.fixed_money_mode:
+            # Montants fixes : TP = +fixed_tp_money, SL = -fixed_sl_money (posés chez le broker)
+            ok, raison = self.risk.can_risk_amount(float(self._state.get("daily_pnl") or 0.0),
+                                                   s.fixed_sl_money, s.daily_loss_max)
+            if not ok:
+                self.journal.info(f"{nom} : signal ignoré, {raison}")
+                return False
+            unite = perte_lot / sl_dist if sl_dist > 0 else 0.0
+            fx = compute_fixed_money(capital, s.fixed_sl_money, s.fixed_tp_money, unite, sl_dist,
+                                     info.volume_min, info.volume_step, info.volume_max,
+                                     sl_dist_min=max((t.ask - t.bid) * 3.0, stops_level + (t.ask - t.bid)),
+                                     tp_dist_min=stops_level + (t.ask - t.bid))
+            if not fx.ok:
+                self.journal.warning(f"{nom} : {fx.reason}")
+                return False
+            sl_dist, tp_dist = fx.sl_dist, fx.tp_dist
+            lot = LotResult(True, volume=fx.volume, risk_amount=s.fixed_sl_money,
+                            risk_pct=s.fixed_sl_money / capital * 100.0, reason="OK")
+        else:
+            lot = compute_lot(capital, s.risk_per_trade, perte_lot,
+                              info.volume_min, info.volume_step, info.volume_max)
+            if not lot.ok:
+                self.journal.warning(f"{nom} : {lot.reason}")
+                return False
 
         # ---- Envoi de l'ordre (SL et TP TOUJOURS posés à l'ouverture)
         sens = "ACHAT" if d.action == "BUY" else "VENTE"
@@ -412,7 +431,8 @@ class TradingEngine:
         self.risk.trades_today += 1
         self.journal.success(
             f"{nom} : {sens} {req['volume']:g} lot à {req['price']} | SL {req['sl']} | "
-            f"TP {req['tp']} | risque ≈ {lot.risk_amount:.2f} ({lot.risk_pct:.2f} %)")
+            f"TP {req['tp']} | risque ≈ {lot.risk_amount:.2f} ({lot.risk_pct:.2f} %)"
+            + (f" | gain visé {s.fixed_tp_money:.2f}" if s.fixed_money_mode else ""))
         self.journal.record_trade_open(req.get("ticket", 0), nom, d.action, req["volume"],
                                        req["price"], req["sl"], req["tp"], d.signal)
         return True

@@ -38,6 +38,9 @@ PERTE_JOUR_MAX = 10.0           # % du capital par jour
 TRADES_JOUR_MAX = 20            # nombre de trades par jour
 POSITIONS_TOTAL_MAX = 4         # positions ouvertes en même temps (tous symboles)
 POSITIONS_PAR_SYMBOLE = 1       # fixé : une seule position par symbole
+# Mode "montants fixes" : plafond de la perte d'UN trade, en % du capital.
+# (Remplace le plafond de 2 % tant que ce mode est actif.)
+RISQUE_FIXE_MAX_PCT = 3.0
 
 # Texte que l'utilisateur doit taper pour activer le mode réel
 TEXTE_CONFIRMATION_REEL = "JE COMPRENDS LES RISQUES"
@@ -106,6 +109,12 @@ class Settings:
     reward_risk: float = 1.2              # take profit = stop loss x ce ratio (>= 1)
     spread_factor_max: float = 2.0        # spread refusé s'il dépasse X fois la normale
 
+    # --- Mode "montants fixes" (en devise du compte, ex. dollars) ---
+    # Le TP et le SL de chaque trade sont posés pour gagner / perdre ces montants.
+    fixed_money_mode: bool = True
+    fixed_tp_money: float = 0.50          # gain visé par trade
+    fixed_sl_money: float = 0.70          # perte maximale par trade
+
     # --- Pause "annonces économiques" (manuelle) ---
     news_pause_min: int = 30
 
@@ -170,6 +179,9 @@ class Settings:
         borne("reward_risk", 1.0, 5.0)          # ratio 1:1 minimum imposé
         borne("spread_factor_max", 1.2, 5.0)
         borne("news_pause_min", 5, 240, int)
+        borne("fixed_tp_money", 0.05, 1000.0)
+        borne("fixed_sl_money", 0.05, 1000.0)
+        self.fixed_money_mode = bool(self.fixed_money_mode)
 
         if self.timeframe not in ("M1", "M5"):
             notes.append("timeframe : seules M1 et M5 sont permises, remis à M5")

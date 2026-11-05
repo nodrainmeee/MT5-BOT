@@ -24,6 +24,7 @@ CHAMPS_MODIFIABLES = {
     "pause_after_loss_min", "max_total_positions", "session_start", "session_end",
     "trend_ema", "rsi_buy_max", "rsi_sell_min", "atr_sl_mult", "reward_risk",
     "spread_factor_max", "news_pause_min",
+    "fixed_money_mode", "fixed_tp_money", "fixed_sl_money",
 }
 
 

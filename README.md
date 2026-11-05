@@ -167,6 +167,20 @@ déclenche moins de faux positifs que le mode « fichier unique ».
 | Stop loss | 1,5 × ATR | S'adapte à la volatilité |
 | Spread max | 2 × normale | Ignore les signaux quand le spread s'envole |
 
+### Mode « montants fixes » (gain et perte en argent)
+
+Réglage **Sortie en argent** (activé par défaut) : chaque trade est ouvert avec un take profit
+qui rapporte **0,50** et un stop loss qui coûte au maximum **0,70** (montants modifiables, en devise
+du compte). Le bot calcule les distances en pips à partir du lot et les pose chez le broker : la
+fermeture est automatique, même si le PC s'éteint.
+
+- Plafond de sécurité : la perte fixe ne peut pas dépasser **3 % du capital** (0,90 pour 30 $).
+- Le bot **refuse** un trade si la perte fixe ferait dépasser la perte maximale du jour.
+  Avec 30 $ et 3 % par jour (0,90), une seule perte de 0,70 bloque donc les trades suivants du jour.
+  Pour en autoriser davantage, augmentez « Perte max du jour » (à vos risques).
+- Ratio gain/perte = 0,71 : il faut gagner environ 60 % des trades pour ne pas perdre d'argent.
+- Backtest : `python -m backtest.backtest --mt5 --symbole EURUSD --mois 6 --gain-fixe 0.50 --perte-fixe 0.70`
+
 ### Passer en mode réel
 
 Bouton **Passer en mode réel** (bot arrêté), puis tapez `JE COMPRENDS LES RISQUES`.

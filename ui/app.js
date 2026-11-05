@@ -84,7 +84,9 @@ function toggleTheme() {
 function fillSettings(s) {
   $$("#settings-form [data-key]").forEach((el) => {
     const v = s[el.dataset.key];
-    if (v !== undefined) el.value = String(v);
+    if (v === undefined) return;
+    if (el.type === "checkbox") el.checked = !!v;
+    else el.value = String(v);
   });
   $$("#assets input[data-symbol]").forEach((cb) => { cb.checked = !!s.symbols[cb.dataset.symbol]; });
   $("#xau-warning").hidden = !s.symbols.XAUUSD;
@@ -104,7 +106,9 @@ function readSettings() {
     const err = el.parentElement.querySelector(".field-error");
     el.removeAttribute("aria-invalid");
     if (err) err.textContent = "";
-    if (el.type === "number") {
+    if (el.type === "checkbox") {
+      data[el.dataset.key] = el.checked;
+    } else if (el.type === "number") {
       const v = Number(el.value);
       const min = Number(el.min), max = Number(el.max);
       if (el.value === "" || Number.isNaN(v) || v < min || v > max) {

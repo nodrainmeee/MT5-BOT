@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-from .config import POSITIONS_PAR_SYMBOLE
+from .config import POSITIONS_PAR_SYMBOLE, RISQUE_FIXE_MAX_PCT
 
 # Tolérance : on accepte que le lot minimal dépasse le risque voulu de 10 %
 # au maximum (arrondis), jamais plus.
@@ -82,6 +82,56 @@ def compute_lot(capital: float, risque_pct: float, perte_par_lot: float,
                      risk_pct=risque / capital * 100.0, reason="OK")
 
 
+@dataclass
+class FixedMoneyResult:
+    ok: bool
+    volume: float = 0.0
+    sl_dist: float = 0.0      # distance du stop loss (en prix)
+    tp_dist: float = 0.0      # distance du take profit (en prix)
+    reason: str = ""
+
+
+def compute_fixed_money(capital: float, sl_money: float, tp_money: float,
+                        perte_par_lot_par_unite: float, sl_dist_atr: float,
+                        lot_min: float, pas_lot: float, lot_max: float,
+                        sl_dist_min: float = 0.0, tp_dist_min: float = 0.0) -> FixedMoneyResult:
+    """Mode "montants fixes" : le SL et le TP sont calculés pour que le trade
+    perde exactement 'sl_money' au stop loss et gagne 'tp_money' au take profit.
+
+    perte_par_lot_par_unite = argent perdu (devise du compte) quand 1 lot
+    bouge de 1,0 en prix. Le lot est choisi pour que le SL reste proche du SL
+    "ATR" ; s'il tombe sous le lot minimal, on prend le lot minimal.
+    Si les distances obtenues sont plus petites que le minimum imposé (3 x
+    spread, distance du broker), on essaie un lot plus petit, sinon REFUS.
+    """
+    if capital <= 0 or sl_money <= 0 or tp_money <= 0:
+        return FixedMoneyResult(False, reason="Capital ou montants invalides")
+    if perte_par_lot_par_unite <= 0 or math.isnan(perte_par_lot_par_unite) or sl_dist_atr <= 0:
+        return FixedMoneyResult(False, reason="Impossible de calculer la valeur du pip")
+    if pas_lot <= 0 or lot_min <= 0:
+        return FixedMoneyResult(False, reason="Caractéristiques de lot du symbole invalides")
+    plafond = capital * RISQUE_FIXE_MAX_PCT / 100.0
+    if sl_money > plafond:
+        return FixedMoneyResult(
+            False, reason=(f"Perte fixe {sl_money:.2f} = {sl_money / capital * 100:.1f} % du capital, "
+                           f"au-dessus du plafond de {RISQUE_FIXE_MAX_PCT:g} % ({plafond:.2f}). Trade refusé."))
+
+    cible = sl_money / (perte_par_lot_par_unite * sl_dist_atr)      # lot pour un SL "ATR"
+    nb = math.floor(cible / pas_lot + 1e-9)
+    lot = max(lot_min, round(nb * pas_lot, _decimales(pas_lot)))
+    if lot_max > 0:
+        lot = min(lot, lot_max)
+    while lot >= lot_min - 1e-12:
+        sl_d = sl_money / (lot * perte_par_lot_par_unite)
+        tp_d = tp_money / (lot * perte_par_lot_par_unite)
+        if sl_d >= sl_dist_min and tp_d >= tp_dist_min:
+            return FixedMoneyResult(True, volume=lot, sl_dist=sl_d, tp_dist=tp_d, reason="OK")
+        lot = round(lot - pas_lot, _decimales(pas_lot))
+    return FixedMoneyResult(
+        False, reason=(f"Avec {sl_money:.2f} de perte et {tp_money:.2f} de gain, le SL/TP serait plus "
+                       "proche que le minimum autorisé (spread / broker). Trade refusé."))
+
+
 class RiskManager:
     """Garde en mémoire l'état du jour : trades, pertes, pauses, arrêt."""
 
@@ -133,6 +183,17 @@ class RiskManager:
                                     f"pour une limite de -{abs(perte_max_pct):g} %)")
             return True
         return False
+
+    def can_risk_amount(self, pnl_jour: float, montant: float, perte_max_pct: float) -> tuple[bool, str]:
+        """Mode montants fixes : si ce trade perdait 'montant', dépasserait-on la
+        perte maximale du jour ? (Évite de dépasser la limite d'un seul coup.)"""
+        if self.start_balance <= 0:
+            return True, "OK"
+        limite = -abs(perte_max_pct) / 100.0 * self.start_balance
+        if pnl_jour - montant < limite:
+            return False, (f"Un trade perdant ({montant:.2f}) ferait dépasser la perte maximale du "
+                           f"jour ({abs(limite):.2f}, soit {abs(perte_max_pct):g} %)")
+        return True, "OK"
 
     # ---------------------------------------------------------------- pauses
     def register_loss(self, maintenant: datetime, minutes: int) -> None:

@@ -47,7 +47,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bot.indicators import add_indicators          # noqa: E402
-from bot.risk import compute_lot                    # noqa: E402
+from bot.risk import compute_fixed_money, compute_lot                    # noqa: E402
 from bot.strategy import (StrategyParams, adjust_distances, bars_needed,  # noqa: E402
                           decide_at, in_session, spread_is_abnormal)
 
@@ -158,6 +158,9 @@ class Config:
     commission_lot: float = 0.0     # commission aller-retour par lot (devise du compte)
     decalage_serveur_h: float = 0.0
     cent: bool = False
+    fixed_money: bool = False       # mode montants fixes (TP/SL en argent)
+    tp_money: float = 0.50
+    sl_money: float = 0.70
 
 
 def _vers_usd(gain_cotation: float, symbole: str, prix: float) -> float:
@@ -211,7 +214,16 @@ def run_backtest(df: pd.DataFrame, cfg: Config, params: StrategyParams) -> dict:
             sl_d, tp_d = adjust_distances(d.sl_distance, d.tp_distance, spread_prix, 0.0,
                                           params.reward_risk)
             perte_lot = _vers_usd(sl_d * contrat, cfg.symbole, b.open)
-            lot = compute_lot(solde, cfg.risque_pct, perte_lot, lot_min, pas_lot, lot_max)
+            if cfg.fixed_money:
+                unite = _vers_usd(contrat, cfg.symbole, b.open)     # perte par lot et par 1,0 de prix
+                fx = compute_fixed_money(solde, cfg.sl_money, cfg.tp_money, unite, sl_d, lot_min,
+                                         pas_lot, lot_max, sl_dist_min=spread_prix * 3.0,
+                                         tp_dist_min=spread_prix)
+                lot = fx
+                if fx.ok:
+                    sl_d, tp_d = fx.sl_dist, fx.tp_dist
+            else:
+                lot = compute_lot(solde, cfg.risque_pct, perte_lot, lot_min, pas_lot, lot_max)
             if not lot.ok:
                 ignores["lot_trop_gros"] += 1
             else:
@@ -302,7 +314,7 @@ def report(res: dict) -> str:
         "=" * 64,
         f" Période               : {res['periode'][0]:%d/%m/%Y} -> {res['periode'][1]:%d/%m/%Y} "
         f"({res['bougies']} bougies)",
-        f" Capital de départ     : {cfg.capital:.2f} $   | risque/trade : {cfg.risque_pct:g} %"
+        f" Capital de départ     : {cfg.capital:.2f} $   | " + (f"montants fixes : +{cfg.tp_money:.2f} / -{cfg.sl_money:.2f} $" if cfg.fixed_money else f"risque/trade : {cfg.risque_pct:g} %")
         + ("   | compte Cent (hypothèse)" if cfg.cent else ""),
         f" Nombre de trades      : {nb}",
         f" Taux de réussite      : {len(gagnants) / nb * 100:.1f} %" if nb else " Taux de réussite      : -",
@@ -348,6 +360,10 @@ def main(argv=None):
     ap.add_argument("--tendance", type=int, default=200, choices=[50, 200])
     ap.add_argument("--rr", type=float, default=1.2)
     ap.add_argument("--atr", type=float, default=1.5)
+    ap.add_argument("--gain-fixe", type=float, default=None,
+                    help="mode montants fixes : gain visé par trade (ex. 0.50)")
+    ap.add_argument("--perte-fixe", type=float, default=None,
+                    help="mode montants fixes : perte max par trade (ex. 0.70)")
     ap.add_argument("--sortie", default="backtest_resultats", help="dossier des résultats")
     a = ap.parse_args(argv)
 
@@ -362,7 +378,9 @@ def main(argv=None):
     cfg = Config(symbole=a.symbole, capital=a.capital, risque_pct=min(a.risque, 2.0),
                  perte_jour_max=a.perte_jour, trades_jour_max=a.trades_jour,
                  pause_perte_min=a.pause, session_debut=a.debut, session_fin=a.fin,
-                 commission_lot=a.commission, decalage_serveur_h=a.decalage_serveur, cent=a.cent)
+                 commission_lot=a.commission, decalage_serveur_h=a.decalage_serveur, cent=a.cent,
+                 fixed_money=(a.gain_fixe is not None and a.perte_fixe is not None),
+                 tp_money=a.gain_fixe or 0.50, sl_money=a.perte_fixe or 0.70)
     params = StrategyParams(trend_ema=a.tendance, reward_risk=max(1.0, a.rr), atr_sl_mult=a.atr)
     res = run_backtest(df, cfg, params)
     texte = report(res)

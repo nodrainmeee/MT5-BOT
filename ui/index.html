@@ -250,6 +250,24 @@
             </div>
           </div>
 
+          <fieldset class="field">
+            <legend>Sortie en argent (mode montants fixes)</legend>
+            <label><input id="s-fixed-on" type="checkbox" data-key="fixed_money_mode"> Activer : fermer chaque trade à un gain / une perte fixe</label>
+            <div class="grid-2">
+              <div class="field">
+                <label for="s-fixed-tp">Gain par trade (devise du compte)</label>
+                <input id="s-fixed-tp" type="number" step="0.05" min="0.05" max="1000" data-key="fixed_tp_money">
+                <p class="field-error"></p>
+              </div>
+              <div class="field">
+                <label for="s-fixed-sl">Perte max par trade (devise du compte)</label>
+                <input id="s-fixed-sl" type="number" step="0.05" min="0.05" max="1000" data-key="fixed_sl_money">
+                <p class="field-error"></p>
+              </div>
+            </div>
+            <p class="help">Le take profit et le stop loss sont posés chez le broker à l'ouverture. Plafond : 3 % du capital par trade.</p>
+          </fieldset>
+
           <details class="advanced">
             <summary>Réglages avancés de la stratégie</summary>
             <div class="grid-2">
