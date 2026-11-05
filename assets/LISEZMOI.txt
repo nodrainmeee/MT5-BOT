@@ -1,0 +1,1 @@
+# Dossier de l'icône (icon.ico est créée par tools/make_icon.py)

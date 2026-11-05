@@ -1,0 +1,334 @@
+<!doctype html>
+<!--
+  index.html : structure de l'interface de MonBot.
+  Le style est dans style.css, le comportement dans app.js.
+  Tout est local (aucune police ni bibliothèque téléchargée sur Internet).
+-->
+<html lang="fr" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MonBot</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Fond animé coloré : c'est lui qu'on voit "flouté" à travers le verre -->
+  <div class="backdrop" aria-hidden="true">
+    <span class="blob blob-1"></span><span class="blob blob-2"></span>
+    <span class="blob blob-3"></span><span class="blob blob-4"></span>
+  </div>
+
+  <!-- Icônes SVG (une seule famille, trait fin) réutilisées avec <use> -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 5v14l11-7z" fill="currentColor"/></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 21h20L12 3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v5M12 18v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+      <symbol id="i-logo" viewBox="0 0 24 24"><path d="M3 17l5-5 4 3 7-8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="19" cy="7" r="2" fill="currentColor"/></symbol>
+    </defs>
+  </svg>
+
+  <!-- ======================= BARRE DU HAUT ======================= -->
+  <header class="topbar glass">
+    <div class="brand">
+      <span class="brand-mark"><svg><use href="#i-logo"/></svg></span>
+      <div>
+        <h1>MonBot</h1>
+        <p class="muted small">Scalping MT5 · Exness <span id="app-version"></span></p>
+      </div>
+    </div>
+
+    <!-- Témoins d'état : texte + couleur (jamais la couleur seule) -->
+    <ul class="status-list" aria-label="État du système">
+      <li class="pill" id="pill-mt5" data-state="off"><span class="dot"></span><span class="pill-k">MT5</span><span class="pill-v">Non connecté</span></li>
+      <li class="pill" id="pill-algo" data-state="off"><span class="dot"></span><span class="pill-k">Algo Trading</span><span class="pill-v">Inconnu</span></li>
+      <li class="pill" id="pill-account" data-state="off"><span class="dot"></span><span class="pill-k">Compte</span><span class="pill-v">—</span></li>
+      <li class="pill" id="pill-bot" data-state="off"><span class="dot"></span><span class="pill-k">Bot</span><span class="pill-v">Arrêté</span></li>
+    </ul>
+
+    <button class="theme-switch" id="theme-toggle" type="button" role="switch"
+            aria-checked="true" aria-label="Thème sombre">
+      <svg class="ts-icon ts-sun"><use href="#i-sun"/></svg>
+      <span class="ts-track"><span class="ts-knob"></span></span>
+      <svg class="ts-icon ts-moon"><use href="#i-moon"/></svg>
+    </button>
+  </header>
+
+  <!-- Mention de risque OBLIGATOIRE et toujours visible -->
+  <div class="risk-banner glass" role="note">
+    <svg><use href="#i-alert"/></svg>
+    <p><strong>Le trading comporte un risque de perte en capital. Aucun gain n'est garanti.</strong>
+      <span class="muted">Commencez en démo pendant 1 à 2 mois. N'investissez que ce que vous pouvez vous permettre de perdre.</span></p>
+  </div>
+
+  <div id="preview-warning" class="notice warn" hidden>
+    Aperçu dans un navigateur : les boutons ne fonctionnent que dans le logiciel MonBot.
+  </div>
+
+  <main class="layout">
+    <!-- ======================= COLONNE PRINCIPALE ======================= -->
+    <section class="col-main" aria-label="Tableau de bord">
+      <div class="stats">
+        <article class="glass card stat">
+          <h2 class="stat-k">Solde</h2>
+          <p class="stat-v" id="stat-balance">—</p>
+          <p class="stat-sub muted" id="stat-currency">&nbsp;</p>
+        </article>
+        <article class="glass card stat">
+          <h2 class="stat-k">Équité</h2>
+          <p class="stat-v" id="stat-equity">—</p>
+          <p class="stat-sub muted" id="stat-positions">0 position ouverte</p>
+        </article>
+        <article class="glass card stat">
+          <h2 class="stat-k">Résultat du jour</h2>
+          <p class="stat-v" id="stat-pnl">—</p>
+          <p class="stat-sub" id="stat-pnl-pct">&nbsp;</p>
+        </article>
+        <article class="glass card stat">
+          <h2 class="stat-k">Trades du jour</h2>
+          <p class="stat-v" id="stat-trades">0</p>
+          <p class="stat-sub muted" id="stat-trades-max">sur 6 maximum</p>
+        </article>
+      </div>
+
+      <div id="pause-banner" class="notice warn" role="status" hidden></div>
+      <div id="halt-banner" class="notice danger" role="alert" hidden></div>
+
+      <article class="glass card chart-card">
+        <header class="card-head">
+          <h2>Résultat du jour</h2>
+          <span class="muted small" id="chart-caption">Courbe mise à jour toutes les 15 s</span>
+        </header>
+        <div class="chart-wrap">
+          <canvas id="pnl-chart" role="img" aria-label="Courbe du résultat du jour"></canvas>
+          <p class="chart-empty muted" id="chart-empty">La courbe apparaîtra quand le bot sera démarré.</p>
+        </div>
+      </article>
+
+      <article class="glass card log-card">
+        <header class="card-head">
+          <h2>Journal en direct</h2>
+          <div class="head-actions">
+            <label class="check-inline small"><input type="checkbox" id="log-autoscroll" checked> Défilement auto</label>
+            <button class="btn btn-ghost btn-sm" id="btn-folder" type="button"><svg><use href="#i-folder"/></svg>Dossier des journaux</button>
+          </div>
+        </header>
+        <ol class="log-list" id="log-list" aria-live="polite" aria-label="Journal des événements"></ol>
+      </article>
+
+      <article class="glass card">
+        <header class="card-head">
+          <h2>Derniers trades</h2>
+          <button class="btn btn-ghost btn-sm" id="btn-export" type="button"><svg><use href="#i-download"/></svg>Exporter en CSV</button>
+        </header>
+        <div class="table-wrap">
+          <table class="trades">
+            <thead><tr><th scope="col">Ouverture</th><th scope="col">Symbole</th><th scope="col">Sens</th>
+              <th scope="col" class="num">Lot</th><th scope="col">Signal</th><th scope="col">Sortie</th><th scope="col" class="num">Résultat</th></tr></thead>
+            <tbody id="trades-body"><tr><td colspan="7" class="muted">Aucun trade pour l'instant.</td></tr></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+    <!-- ======================= COLONNE DE DROITE ======================= -->
+    <aside class="col-side" aria-label="Commandes et réglages">
+      <!-- Commandes -->
+      <article class="glass card">
+        <h2>Commandes</h2>
+        <div class="controls">
+          <button class="btn btn-start" id="btn-start" type="button"><svg><use href="#i-play"/></svg>Démarrer</button>
+          <button class="btn btn-secondary" id="btn-stop" type="button" disabled><svg><use href="#i-stop"/></svg>Arrêter</button>
+        </div>
+        <button class="btn btn-emergency" id="btn-emergency" type="button"><svg><use href="#i-alert"/></svg>Arrêt d'urgence</button>
+        <div class="news-row">
+          <label for="news-minutes" class="small">Pause annonces</label>
+          <select id="news-minutes">
+            <option value="15">15 min</option><option value="30" selected>30 min</option>
+            <option value="60">1 h</option><option value="120">2 h</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" id="btn-news" type="button"><svg><use href="#i-pause"/></svg>Pause</button>
+          <button class="btn btn-ghost btn-sm" id="btn-resume" type="button">Reprendre</button>
+        </div>
+        <p class="help">Avant une annonce importante (NFP, BCE, Fed...), mettez le bot en pause : il ne prend plus de nouveaux trades.</p>
+      </article>
+
+      <!-- Mode démo / réel -->
+      <article class="glass card">
+        <h2>Mode</h2>
+        <div class="mode-row">
+          <span class="mode-badge" id="mode-badge" data-mode="demo"><svg><use href="#i-shield"/></svg><span>Mode DÉMO</span></span>
+          <button class="btn btn-ghost btn-sm" id="btn-real" type="button">Passer en mode réel</button>
+        </div>
+        <p class="help" id="mode-help">En mode démo, le bot refuse de trader sur un compte réel.</p>
+      </article>
+
+      <!-- Connexion MT5 -->
+      <article class="glass card">
+        <h2>Connexion MT5</h2>
+        <p class="help">Laissez vide pour utiliser le compte déjà connecté dans MetaTrader 5 (recommandé).</p>
+        <form id="creds-form" class="form" autocomplete="off" onsubmit="return false">
+          <div class="field">
+            <label for="mt5-login">Numéro de compte</label>
+            <input id="mt5-login" inputmode="numeric" placeholder="ex. 12345678">
+            <p class="field-error" id="err-login"></p>
+          </div>
+          <div class="field">
+            <label for="mt5-password">Mot de passe</label>
+            <input id="mt5-password" type="password" placeholder="••••••••">
+            <p class="help" id="pwd-help"></p>
+          </div>
+          <div class="field">
+            <label for="mt5-server">Serveur</label>
+            <input id="mt5-server" placeholder="ex. Exness-MT5Trial">
+          </div>
+          <label class="check-inline"><input type="checkbox" id="mt5-remember"> Mémoriser (Gestionnaire d'identifiants Windows)</label>
+          <button class="btn btn-ghost btn-sm" id="btn-forget" type="button">Oublier les identifiants</button>
+        </form>
+      </article>
+
+      <!-- Actifs -->
+      <article class="glass card">
+        <h2>Actifs</h2>
+        <fieldset class="assets" id="assets">
+          <legend class="sr-only">Actifs tradés</legend>
+          <label class="asset"><input type="checkbox" data-symbol="EURUSD"><span><strong>EURUSD</strong><small class="muted">Le plus liquide, spread bas</small></span></label>
+          <label class="asset"><input type="checkbox" data-symbol="GBPUSD"><span><strong>GBPUSD</strong><small class="muted">Plus nerveux</small></span></label>
+          <label class="asset"><input type="checkbox" data-symbol="USDJPY"><span><strong>USDJPY</strong><small class="muted">Liquide, session asiatique aussi</small></span></label>
+          <label class="asset"><input type="checkbox" data-symbol="XAUUSD"><span><strong>XAUUSD</strong><small class="muted">Or, très volatil</small></span></label>
+        </fieldset>
+        <p class="notice warn small" id="xau-warning" hidden>L'or bouge très vite. Avec un petit capital, utilisez un compte Cent.</p>
+      </article>
+
+      <!-- Réglages -->
+      <article class="glass card">
+        <h2>Réglages</h2>
+        <form id="settings-form" class="form" onsubmit="return false" novalidate>
+          <div class="grid-2">
+            <div class="field">
+              <label for="s-risk">Risque par trade (%)</label>
+              <input id="s-risk" type="number" step="0.1" min="0.1" max="2" data-key="risk_per_trade">
+              <p class="field-error"></p>
+            </div>
+            <div class="field">
+              <label for="s-dloss">Perte max du jour (%)</label>
+              <input id="s-dloss" type="number" step="0.5" min="0.5" max="10" data-key="daily_loss_max">
+              <p class="field-error"></p>
+            </div>
+            <div class="field">
+              <label for="s-maxtrades">Trades max / jour</label>
+              <input id="s-maxtrades" type="number" step="1" min="1" max="20" data-key="max_trades_per_day">
+              <p class="field-error"></p>
+            </div>
+            <div class="field">
+              <label for="s-pause">Pause après perte (min)</label>
+              <input id="s-pause" type="number" step="1" min="0" max="240" data-key="pause_after_loss_min">
+              <p class="field-error"></p>
+            </div>
+            <div class="field">
+              <label for="s-tf">Unité de temps</label>
+              <select id="s-tf" data-key="timeframe"><option value="M5">M5 (recommandé)</option><option value="M1">M1</option></select>
+            </div>
+            <div class="field">
+              <label for="s-maxpos">Positions simultanées</label>
+              <input id="s-maxpos" type="number" step="1" min="1" max="4" data-key="max_total_positions">
+              <p class="field-error"></p>
+            </div>
+            <div class="field">
+              <label for="s-start">Début (heure de Paris)</label>
+              <input id="s-start" type="time" data-key="session_start">
+            </div>
+            <div class="field">
+              <label for="s-end">Fin (heure de Paris)</label>
+              <input id="s-end" type="time" data-key="session_end">
+            </div>
+          </div>
+
+          <details class="advanced">
+            <summary>Réglages avancés de la stratégie</summary>
+            <div class="grid-2">
+              <div class="field">
+                <label for="s-trend">Filtre de tendance</label>
+                <select id="s-trend" data-key="trend_ema"><option value="200">EMA 200</option><option value="50">EMA 50</option></select>
+              </div>
+              <div class="field">
+                <label for="s-rr">Ratio gain/risque</label>
+                <input id="s-rr" type="number" step="0.1" min="1" max="5" data-key="reward_risk">
+                <p class="field-error"></p>
+              </div>
+              <div class="field">
+                <label for="s-rsibuy">RSI max à l'achat</label>
+                <input id="s-rsibuy" type="number" step="1" min="50" max="95" data-key="rsi_buy_max">
+                <p class="field-error"></p>
+              </div>
+              <div class="field">
+                <label for="s-rsisell">RSI min à la vente</label>
+                <input id="s-rsisell" type="number" step="1" min="5" max="50" data-key="rsi_sell_min">
+                <p class="field-error"></p>
+              </div>
+              <div class="field">
+                <label for="s-atr">Stop loss (x ATR)</label>
+                <input id="s-atr" type="number" step="0.1" min="0.5" max="5" data-key="atr_sl_mult">
+                <p class="field-error"></p>
+              </div>
+              <div class="field">
+                <label for="s-spread">Spread max (x normale)</label>
+                <input id="s-spread" type="number" step="0.1" min="1.2" max="5" data-key="spread_factor_max">
+                <p class="field-error"></p>
+              </div>
+            </div>
+          </details>
+
+          <button class="btn btn-primary" id="btn-save" type="button">Enregistrer les réglages</button>
+          <p class="help">Plafonds imposés : 2 % de risque par trade, 10 % de perte par jour, 20 trades par jour.</p>
+        </form>
+      </article>
+
+      <!-- Conseils -->
+      <article class="glass card tips">
+        <h2>Avant de démarrer</h2>
+        <ol>
+          <li>Ouvrez MetaTrader 5 et connectez-vous à votre compte.</li>
+          <li>Activez le bouton <strong>Algo Trading</strong> dans MT5.</li>
+          <li>Lancez MT5 et MonBot avec les <strong>mêmes droits</strong> (tous deux normaux, ou tous deux administrateur).</li>
+          <li>Désactivez la <strong>mise en veille</strong> du PC.</li>
+          <li>MT5 peut être réduit, mais <strong>jamais fermé</strong>.</li>
+        </ol>
+      </article>
+    </aside>
+  </main>
+
+  <!-- ======================= FENÊTRES DE CONFIRMATION ======================= -->
+  <dialog class="modal glass" id="modal-real" aria-labelledby="real-title">
+    <h2 id="real-title">Passer en mode réel ?</h2>
+    <p>En mode réel, le bot peut trader <strong>votre argent</strong>. Vous pouvez perdre tout ou partie de votre capital. Aucun gain n'est garanti, même avec un bon backtest.</p>
+    <p class="small muted">Les limites de risque restent actives et ne peuvent pas être désactivées.</p>
+    <label for="real-confirm">Pour confirmer, tapez : <strong id="real-text"></strong></label>
+    <input id="real-confirm" autocomplete="off">
+    <p class="field-error" id="real-error"></p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="real-cancel" type="button">Annuler</button>
+      <button class="btn btn-danger" id="real-ok" type="button" disabled>Activer le mode réel</button>
+    </div>
+  </dialog>
+
+  <dialog class="modal glass" id="modal-emergency" aria-labelledby="em-title">
+    <h2 id="em-title">Bot arrêté</h2>
+    <p id="em-text"></p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="em-keep" type="button">Garder les positions</button>
+      <button class="btn btn-danger" id="em-close" type="button">Fermer toutes les positions du bot</button>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

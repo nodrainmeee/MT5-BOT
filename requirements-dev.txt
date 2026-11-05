@@ -1,0 +1,5 @@
+# Outils utilisés uniquement pour compiler et tester (pas dans le logiciel final)
+pyinstaller==6.11.1
+pyinstaller-hooks-contrib==2024.10
+pytest==8.3.3
+Pillow==11.0.0

@@ -1,0 +1,25 @@
+# =====================================================================
+# Dépendances du logiciel MonBot (versions figées = builds reproductibles)
+# =====================================================================
+# Remarque : "MetaTrader5", "pywebview" et "pythonnet" ne s'installent
+# correctement que sous Windows. Le marqueur ; sys_platform == "win32"
+# permet quand même d'exécuter les tests de logique sous Linux/Mac.
+
+# Connexion officielle au terminal MetaTrader 5 (Windows uniquement)
+MetaTrader5==5.0.5120 ; sys_platform == "win32"
+
+# Calculs (indicateurs, tableaux de données)
+# numpy 1.26 est volontairement gardé : c'est la version la plus compatible
+# avec toutes les versions de la bibliothèque MetaTrader5.
+numpy==1.26.4
+pandas==2.2.3
+
+# Fenêtre native Windows qui affiche l'interface HTML (moteur Edge WebView2)
+pywebview==5.3.2
+pythonnet==3.0.4 ; sys_platform == "win32"
+
+# Stockage sécurisé du mot de passe (Gestionnaire d'identifiants Windows)
+keyring==25.5.0
+
+# Fuseaux horaires (heure de Paris) : Windows n'a pas la base IANA intégrée
+tzdata==2024.2
