@@ -12,6 +12,7 @@ Pour tester sans compiler (sur votre PC, après pip install -r requirements.txt)
 """
 from __future__ import annotations
 
+import os
 import sys
 
 
@@ -31,11 +32,15 @@ def main() -> None:
     journal.info(f"{APP_NAME} lancé. Mode démo par défaut. Cliquez sur « Démarrer » pour vous connecter à MT5.")
 
     theme = store.get().theme
+    # Affichage économe (PC ancien) : interface plate sans effets -> pas besoin d'accélération
+    # graphique, et un seul processus de rendu. Un réglage déjà posé par l'utilisateur est respecté.
+    os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+                          "--disable-gpu --renderer-process-limit=1")
     fenetre = webview.create_window(
         title=APP_NAME,
         url=str(resource_path("ui/index.html")),
         js_api=api,
-        width=1360, height=900, min_size=(1024, 700),
+        width=1180, height=800, min_size=(900, 640),
         # Couleur affichée pendant le chargement (évite un flash blanc)
         background_color="#0b1020" if theme == "dark" else "#eef3fb",
     )

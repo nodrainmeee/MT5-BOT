@@ -47,7 +47,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bot.indicators import add_indicators          # noqa: E402
-from bot.risk import compute_fixed_money, compute_lot                    # noqa: E402
+from bot.risk import can_add_to_symbol, compute_fixed_money, compute_lot                    # noqa: E402
 from bot.strategy import (StrategyParams, adjust_distances, bars_needed,  # noqa: E402
                           decide_at, in_session, spread_is_abnormal)
 
@@ -159,8 +159,9 @@ class Config:
     decalage_serveur_h: float = 0.0
     cent: bool = False
     fixed_money: bool = False       # mode montants fixes (TP/SL en argent)
-    tp_money: float = 0.50
+    tp_money: float = 0.10
     sl_money: float = 0.70
+    max_positions: int = 1          # positions simultanées sur l'actif
 
 
 def _vers_usd(gain_cotation: float, symbole: str, prix: float) -> float:
@@ -191,7 +192,7 @@ def run_backtest(df: pd.DataFrame, cfg: Config, params: StrategyParams) -> dict:
     solde = cfg.capital
     courbe = [solde]
     trades = []
-    position = None
+    positions: list = []
     attente = None            # signal en attente d'exécution à l'ouverture suivante
     jour, solde_debut_jour, trades_jour, arret_jour = None, solde, 0, False
     pause_jusqu_a = None
@@ -207,7 +208,7 @@ def run_backtest(df: pd.DataFrame, cfg: Config, params: StrategyParams) -> dict:
             jour, solde_debut_jour, trades_jour, arret_jour = maintenant.date(), solde, 0, False
 
         # --- 1) Exécution d'un signal de la bougie précédente (à l'ouverture)
-        if attente is not None and position is None:
+        if attente is not None and len(positions) < cfg.max_positions:
             d = attente
             attente = None
             entree = b.open + spread_prix if d.action == "BUY" else b.open
@@ -224,19 +225,24 @@ def run_backtest(df: pd.DataFrame, cfg: Config, params: StrategyParams) -> dict:
                     sl_d, tp_d = fx.sl_dist, fx.tp_dist
             else:
                 lot = compute_lot(solde, cfg.risque_pct, perte_lot, lot_min, pas_lot, lot_max)
+            deja = [(q["sens"],
+                     (b.open - q["entree"] if q["sens"] == "BUY" else q["entree"] - (b.open + spread_prix))
+                     * q["lot"] * contrat, q["lot"]) for q in positions]
+            ok_ajout, _ = can_add_to_symbol(d.action, deja, spread_prix * contrat)
             if not lot.ok:
                 ignores["lot_trop_gros"] += 1
+            elif not ok_ajout:
+                ignores["risque"] += 1
             else:
                 sl = entree - sl_d if d.action == "BUY" else entree + sl_d
                 tp = entree + tp_d if d.action == "BUY" else entree - tp_d
-                position = {"sens": d.action, "entree": entree, "sl": sl, "tp": tp,
+                positions.append({"sens": d.action, "entree": entree, "sl": sl, "tp": tp,
                             "lot": lot.volume, "ouverture": b.time, "signal": d.signal,
-                            "spread": spread_prix}
+                            "spread": spread_prix})
                 trades_jour += 1
 
-        # --- 2) La position touche-t-elle son SL ou son TP pendant cette bougie ?
-        if position is not None:
-            p = position
+        # --- 2) Chaque position touche-t-elle son SL ou son TP pendant cette bougie ?
+        for p in list(positions):
             sortie, raison = None, ""
             if p["sens"] == "BUY":      # un achat se ferme au prix bid (prix des bougies)
                 if b.low <= p["sl"]:
@@ -248,27 +254,28 @@ def run_backtest(df: pd.DataFrame, cfg: Config, params: StrategyParams) -> dict:
                     sortie, raison = p["sl"], "SL"
                 elif b.low + spread_prix <= p["tp"]:
                     sortie, raison = p["tp"], "TP"
-            if sortie is not None:
-                ecart = (sortie - p["entree"]) if p["sens"] == "BUY" else (p["entree"] - sortie)
-                brut = _vers_usd(ecart * p["lot"] * contrat, cfg.symbole, sortie)
-                frais = cfg.commission_lot * p["lot"]
-                net = brut - frais
-                solde += net
-                courbe.append(solde)
-                trades.append({"ouverture": p["ouverture"], "fermeture": b.time, "sens": p["sens"],
-                               "signal": p["signal"], "lot": p["lot"], "entree": p["entree"],
-                               "sortie": sortie, "raison": raison, "resultat": round(net, 4),
-                               "cout_spread": round(_vers_usd(p["spread"] * p["lot"] * contrat,
-                                                              cfg.symbole, sortie), 4),
-                               "commission": round(frais, 4), "solde": round(solde, 4)})
-                position = None
-                if net < 0 and cfg.pause_perte_min > 0:
-                    pause_jusqu_a = maintenant + timedelta(minutes=cfg.pause_perte_min)
-                if solde_debut_jour > 0 and (solde - solde_debut_jour) / solde_debut_jour * 100 <= -cfg.perte_jour_max:
-                    arret_jour = True
+            if sortie is None:
+                continue
+            ecart = (sortie - p["entree"]) if p["sens"] == "BUY" else (p["entree"] - sortie)
+            brut = _vers_usd(ecart * p["lot"] * contrat, cfg.symbole, sortie)
+            frais = cfg.commission_lot * p["lot"]
+            net = brut - frais
+            solde += net
+            courbe.append(solde)
+            trades.append({"ouverture": p["ouverture"], "fermeture": b.time, "sens": p["sens"],
+                           "signal": p["signal"], "lot": p["lot"], "entree": p["entree"],
+                           "sortie": sortie, "raison": raison, "resultat": round(net, 4),
+                           "cout_spread": round(_vers_usd(p["spread"] * p["lot"] * contrat,
+                                                          cfg.symbole, sortie), 4),
+                           "commission": round(frais, 4), "solde": round(solde, 4)})
+            positions.remove(p)
+            if net < 0 and cfg.pause_perte_min > 0:
+                pause_jusqu_a = maintenant + timedelta(minutes=cfg.pause_perte_min)
+            if solde_debut_jour > 0 and (solde - solde_debut_jour) / solde_debut_jour * 100 <= -cfg.perte_jour_max:
+                arret_jour = True
 
         # --- 3) Analyse de la bougie i (clôturée) -> entrée éventuelle à i+1
-        if position is None and attente is None and i < n - 1 and not arret_jour:
+        if len(positions) < cfg.max_positions and attente is None and i < n - 1 and not arret_jour:
             d = decide_at(ind, i, params)
             if d.action is None:
                 continue
@@ -284,6 +291,11 @@ def run_backtest(df: pd.DataFrame, cfg: Config, params: StrategyParams) -> dict:
                 continue
             if trades_jour >= cfg.trades_jour_max or (pause_jusqu_a and suivante < pause_jusqu_a):
                 ignores["risque"] += 1
+                continue
+            if cfg.fixed_money and solde_debut_jour > 0 and \
+                    (solde - solde_debut_jour) - (len(positions) + 1) * cfg.sl_money \
+                    < -cfg.perte_jour_max / 100.0 * solde_debut_jour:
+                ignores["risque"] += 1      # un trade perdant ferait dépasser la perte max du jour
                 continue
             attente = d
 
@@ -326,7 +338,7 @@ def report(res: dict) -> str:
         f" Drawdown maximal      : {dd.max():.2f} $ ({dd_pct.max():.1f} %)",
         f" Moyenne par jour      : {net / jours:+.3f} $ ({net / cfg.capital * 100 / jours:+.3f} %/jour calendaire)",
         f" Signaux ignorés       : horaire {res['ignores']['horaire']}, spread {res['ignores']['spread']}, "
-        f"règles de risque {res['ignores']['risque']}, lot minimal trop gros {res['ignores']['lot_trop_gros']}",
+        f"règles de risque {res['ignores']['risque']}, lot/distances SL-TP refusés {res['ignores']['lot_trop_gros']}",
         "-" * 64,
         " Rappel : un backtest positif ne garantit AUCUN gain futur.",
         " Étape suivante obligatoire : 1 à 2 mois en compte DÉMO.",
@@ -364,6 +376,8 @@ def main(argv=None):
                     help="mode montants fixes : gain visé par trade (ex. 0.50)")
     ap.add_argument("--perte-fixe", type=float, default=None,
                     help="mode montants fixes : perte max par trade (ex. 0.70)")
+    ap.add_argument("--positions", type=int, default=1,
+                    help="positions simultanées sur l'actif (défaut 1)")
     ap.add_argument("--sortie", default="backtest_resultats", help="dossier des résultats")
     a = ap.parse_args(argv)
 
@@ -380,7 +394,8 @@ def main(argv=None):
                  pause_perte_min=a.pause, session_debut=a.debut, session_fin=a.fin,
                  commission_lot=a.commission, decalage_serveur_h=a.decalage_serveur, cent=a.cent,
                  fixed_money=(a.gain_fixe is not None and a.perte_fixe is not None),
-                 tp_money=a.gain_fixe or 0.50, sl_money=a.perte_fixe or 0.70)
+                 tp_money=a.gain_fixe or 0.10, sl_money=a.perte_fixe or 0.70,
+                 max_positions=max(1, a.positions))
     params = StrategyParams(trend_ema=a.tendance, reward_risk=max(1.0, a.rr), atr_sl_mult=a.atr)
     res = run_backtest(df, cfg, params)
     texte = report(res)

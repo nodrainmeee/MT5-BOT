@@ -132,6 +132,27 @@ def compute_fixed_money(capital: float, sl_money: float, tp_money: float,
                        "proche que le minimum autorisé (spread / broker). Trade refusé."))
 
 
+def can_add_to_symbol(action: str, existantes: list, cout_spread_par_lot: float,
+                      tolerance: float = 1.5) -> tuple[bool, str]:
+    """Plusieurs positions sur un même actif : à quelles conditions ?
+
+    existantes = liste de (sens "BUY"/"SELL", profit_flottant, volume).
+    - Même sens obligatoire : une vente ouverte pendant un achat ne ferait
+      que payer deux fois le spread.
+    - Pas de moyenne à la baisse : on n'ajoute pas une position si une
+      position existante est en perte au-delà du coût normal du spread
+      (tolérance x le spread, pour absorber le glissement).
+    """
+    for sens, profit, volume in existantes:
+        if sens != action:
+            return False, "une position de sens inverse est déjà ouverte sur cet actif"
+        seuil = -abs(cout_spread_par_lot) * float(volume) * tolerance
+        if profit < seuil:
+            return False, ("une position de cet actif est en perte "
+                           f"({profit:+.2f}) : pas de moyenne à la baisse")
+    return True, "OK"
+
+
 class RiskManager:
     """Garde en mémoire l'état du jour : trades, pertes, pauses, arrêt."""
 
@@ -217,7 +238,8 @@ class RiskManager:
 
     # ---------------------------------------------------------------- décision
     def can_open(self, symbole: str, maintenant: datetime, positions_par_symbole: dict,
-                 total_positions: int, max_trades: int, max_total: int) -> tuple[bool, str]:
+                 total_positions: int, max_trades: int, max_total: int,
+                 max_par_symbole: int | None = None) -> tuple[bool, str]:
         """Peut-on ouvrir un nouveau trade ? Renvoie (oui/non, raison)."""
         if self.halted:
             return False, self.halt_reason or "Bot arrêté pour la journée"
@@ -225,8 +247,10 @@ class RiskManager:
             return False, f"En pause jusqu'à {self.pause_until:%H:%M} ({self.pause_reason})"
         if self.trades_today >= int(max_trades):
             return False, f"Maximum de trades du jour atteint ({self.trades_today}/{max_trades})"
-        if positions_par_symbole.get(symbole, 0) >= POSITIONS_PAR_SYMBOLE:
-            return False, f"Une position est déjà ouverte sur {symbole}"
+        limite = POSITIONS_PAR_SYMBOLE if max_par_symbole is None else int(max_par_symbole)
+        if positions_par_symbole.get(symbole, 0) >= limite:
+            return False, (f"Maximum de positions sur {symbole} atteint "
+                           f"({positions_par_symbole.get(symbole, 0)}/{limite})")
         if total_positions >= int(max_total):
             return False, f"Nombre maximal de positions simultanées atteint ({total_positions}/{max_total})"
         return True, "OK"

@@ -212,6 +212,16 @@ class MT5Connector:
             return self.mt5.symbol_info_tick(nom)
 
     # ================================================================ données
+    def last_closed_bar_time(self, nom: str, timeframe: str):
+        """Heure de la dernière bougie clôturée (lecture d'UNE seule bougie : très léger).
+        Sert à savoir s'il y a une nouvelle bougie sans recharger tout l'historique."""
+        with self._lock:
+            tf = {"M1": self.mt5.TIMEFRAME_M1, "M5": self.mt5.TIMEFRAME_M5}[timeframe]
+            rates = self.mt5.copy_rates_from_pos(nom, tf, 1, 1)
+        if rates is None or len(rates) < 1:
+            return None
+        return pd.to_datetime(int(rates[0]["time"]), unit="s")
+
     def get_closed_rates(self, nom: str, timeframe: str, nombre: int = 1000) -> pd.DataFrame | None:
         """Renvoie les 'nombre' dernières bougies CLÔTURÉES (sans la bougie en cours)."""
         with self._lock:

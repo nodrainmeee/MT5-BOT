@@ -237,14 +237,16 @@ async function closeAll() {
 }
 
 /* ---------------------------------------------------------------------
-   Rafraîchissement de l'état (toutes les secondes)
+   Rafraîchissement de l'état (toutes les 2 secondes)
    --------------------------------------------------------------------- */
 async function poll() {
   try {
-    const s = await window.pywebview.api.get_state(app.lastLogId);
+    const dernierPoint = app.curve.length ? app.curve[app.curve.length - 1][0] : 0;
+    const s = await window.pywebview.api.get_state(app.lastLogId, dernierPoint);
     render(s);
   } catch (e) { /* une erreur ponctuelle ne doit pas arrêter la boucle */ }
-  setTimeout(poll, 1000);
+  // Moins souvent quand la fenêtre est réduite ou cachée (économise le processeur)
+  setTimeout(poll, document.hidden ? 6000 : 2000);
 }
 
 function render(s) {
@@ -297,8 +299,9 @@ function render(s) {
   }
 
   // Courbe
-  if (JSON.stringify(s.pnl_curve) !== JSON.stringify(app.curve)) {
-    app.curve = s.pnl_curve || [];
+  // L'API n'envoie la courbe que si elle a changé (null = inchangée)
+  if (s.pnl_curve && (s.pnl_curve.length || app.curve.length)) {
+    app.curve = s.pnl_curve;
     drawChart();
   }
   if (Date.now() - app.lastTradesRefresh > 30000) refreshTrades();

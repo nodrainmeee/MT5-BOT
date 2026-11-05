@@ -49,6 +49,13 @@ class Journal:
         # check_same_thread=False car le bot (thread séparé) et l'interface
         # écrivent tous les deux ; le verrou self._lock évite les collisions.
         self._db = sqlite3.connect(self.dossier / "monbot.db", check_same_thread=False)
+        # WAL + synchronous NORMAL : beaucoup moins d'écritures disque bloquantes
+        # (important sur un ancien disque dur), sans risque pour la base.
+        try:
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("PRAGMA synchronous=NORMAL")
+        except sqlite3.Error:
+            pass
         self._db.execute("""CREATE TABLE IF NOT EXISTS events(
             id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, level TEXT, message TEXT)""")
         self._db.execute("""CREATE TABLE IF NOT EXISTS trades(

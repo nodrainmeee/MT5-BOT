@@ -12,12 +12,6 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- Fond animé coloré : c'est lui qu'on voit "flouté" à travers le verre -->
-  <div class="backdrop" aria-hidden="true">
-    <span class="blob blob-1"></span><span class="blob blob-2"></span>
-    <span class="blob blob-3"></span><span class="blob blob-4"></span>
-  </div>
-
   <!-- Icônes SVG (une seule famille, trait fin) réutilisées avec <use> -->
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
     <defs>
@@ -236,8 +230,13 @@
               <select id="s-tf" data-key="timeframe"><option value="M5">M5 (recommandé)</option><option value="M1">M1</option></select>
             </div>
             <div class="field">
-              <label for="s-maxpos">Positions simultanées</label>
-              <input id="s-maxpos" type="number" step="1" min="1" max="4" data-key="max_total_positions">
+              <label for="s-maxpos">Positions simultanées (total)</label>
+              <input id="s-maxpos" type="number" step="1" min="1" max="10" data-key="max_total_positions">
+              <p class="field-error"></p>
+            </div>
+            <div class="field">
+              <label for="s-maxpos-sym">Positions par actif</label>
+              <input id="s-maxpos-sym" type="number" step="1" min="1" max="10" data-key="max_positions_per_symbol">
               <p class="field-error"></p>
             </div>
             <div class="field">

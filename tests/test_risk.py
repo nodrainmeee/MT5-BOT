@@ -102,3 +102,21 @@ def test_perte_jour_pire_cas():
     rm.sync(date(2026, 1, 5), 30.0, 0.0, 0)
     assert rm.can_risk_amount(0.0, 0.70, 3.0)[0]        # -0,70 sur limite -0,90 : OK
     assert not rm.can_risk_amount(-0.70, 0.70, 3.0)[0]  # -1,40 dépasserait -0,90
+
+
+def test_plusieurs_positions_meme_actif():
+    from bot.risk import can_add_to_symbol
+    rm = RiskManager()
+    rm.sync(date(2026, 1, 5), 500.0, 0.0, 0)
+    maint = datetime(2026, 1, 5, 10, 0)
+    # limite de 3 par actif
+    assert rm.can_open("EURUSD", maint, {"EURUSD": 2}, 2, 6, 6, 3)[0]
+    assert not rm.can_open("EURUSD", maint, {"EURUSD": 3}, 3, 6, 6, 3)[0]
+    # par défaut (sans paramètre) : 1 seule position par actif, comme avant
+    assert not rm.can_open("EURUSD", maint, {"EURUSD": 1}, 1, 6, 6)[0]
+    # même sens, position à l'équilibre (juste le spread payé) : OK
+    assert can_add_to_symbol("BUY", [("BUY", -0.05, 0.01)], cout_spread_par_lot=10.0)[0]
+    # sens inverse : refus
+    assert not can_add_to_symbol("SELL", [("BUY", 0.0, 0.01)], 10.0)[0]
+    # position en perte au-delà du spread : pas de moyenne à la baisse
+    assert not can_add_to_symbol("BUY", [("BUY", -0.40, 0.01)], 10.0)[0]

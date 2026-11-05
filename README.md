@@ -169,17 +169,41 @@ déclenche moins de faux positifs que le mode « fichier unique ».
 
 ### Mode « montants fixes » (gain et perte en argent)
 
-Réglage **Sortie en argent** (activé par défaut) : chaque trade est ouvert avec un take profit
-qui rapporte **0,50** et un stop loss qui coûte au maximum **0,70** (montants modifiables, en devise
+Réglage **Sortie en argent** (activé par défaut) : chaque position est ouverte avec un take profit
+qui rapporte **0,10** et un stop loss qui coûte au maximum **0,70** (montants modifiables, en devise
 du compte). Le bot calcule les distances en pips à partir du lot et les pose chez le broker : la
 fermeture est automatique, même si le PC s'éteint.
 
-- Plafond de sécurité : la perte fixe ne peut pas dépasser **3 % du capital** (0,90 pour 30 $).
-- Le bot **refuse** un trade si la perte fixe ferait dépasser la perte maximale du jour.
-  Avec 30 $ et 3 % par jour (0,90), une seule perte de 0,70 bloque donc les trades suivants du jour.
-  Pour en autoriser davantage, augmentez « Perte max du jour » (à vos risques).
-- Ratio gain/perte = 0,71 : il faut gagner environ 60 % des trades pour ne pas perdre d'argent.
-- Backtest : `python -m backtest.backtest --mt5 --symbole EURUSD --mois 6 --gain-fixe 0.50 --perte-fixe 0.70`
+- Plafond de sécurité : la perte fixe ne peut pas dépasser **3 % du capital** par position.
+- Avec 0,01 lot sur EURUSD, 0,10 = environ 1 pip. Si le spread est de 1 pip ou plus, le bot
+  **refuse** le trade (le take profit serait plus proche que le minimum autorisé). C'est normal.
+- Le bot refuse un trade si, en comptant toutes les positions ouvertes, une série de pertes ferait
+  dépasser la perte maximale du jour.
+- Ratio gain/perte = 0,14 : il faut gagner environ **88 %** des trades pour ne pas perdre d'argent.
+- Backtest : `python -m backtest.backtest --mt5 --symbole EURUSD --mois 6 --capital 500 --gain-fixe 0.10 --perte-fixe 0.70 --positions 3`
+
+### Plusieurs positions sur un même actif
+
+Réglages **Positions par actif** (défaut 3) et **Positions simultanées (total)** (défaut 6).
+Garde-fous : toutes les positions d'un même actif doivent être **dans le même sens** (pas d'achat
+et de vente en même temps), et le bot n'en ajoute pas si une position de cet actif est en perte
+au-delà du coût normal du spread (**pas de moyenne à la baisse**). Une nouvelle position au plus
+par bougie et par actif.
+
+### Performances (PC ancien : Core i7 4e génération, 4 Go de RAM)
+
+- **Interface plate** : plus de flou « verre dépoli », de taches animées en fond, de dégradés, d'ombres
+  ni de transitions. Ces effets étaient la principale cause de lenteur sur un vieux processeur graphique.
+- **Affichage économe** : accélération graphique désactivée et un seul processus de rendu pour la fenêtre
+  (réglable avec la variable d'environnement `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`).
+- Le moteur ne recharge plus 1000 bougies toutes les 3 secondes : il lit **1 seule bougie** et ne
+  recharge l'historique que lorsqu'une nouvelle bougie se ferme (toutes les 5 minutes en M5).
+- L'historique des trades du jour n'est relu que si les positions changent (ou toutes les 20 s).
+- Hors plage horaire et sans position ouverte, le bot ne vérifie que toutes les 10 s.
+- L'interface se rafraîchit toutes les 2 s (6 s si la fenêtre est réduite) et n'envoie la courbe que si elle a changé.
+- La base de données écrit en mode WAL (moins d'écritures disque bloquantes).
+- Conseils côté MetaTrader 5 : fermer les graphiques inutiles, ne garder que les symboles utilisés dans
+  « Market Watch », et limiter « Max bars in chart » à 5000 (Outils > Options > Graphiques).
 
 ### Passer en mode réel
 

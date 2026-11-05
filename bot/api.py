@@ -21,7 +21,7 @@ from .config import (SYMBOLES_DISPONIBLES, TEXTE_CONFIRMATION_REEL, ConfigStore,
 # Champs que l'interface a le droit de modifier via save_settings()
 CHAMPS_MODIFIABLES = {
     "symbols", "timeframe", "risk_per_trade", "daily_loss_max", "max_trades_per_day",
-    "pause_after_loss_min", "max_total_positions", "session_start", "session_end",
+    "pause_after_loss_min", "max_total_positions", "max_positions_per_symbol", "session_start", "session_end",
     "trend_ema", "rsi_buy_max", "rsi_sell_min", "atr_sl_mult", "reward_risk",
     "spread_factor_max", "news_pause_min",
     "fixed_money_mode", "fixed_tp_money", "fixed_sl_money",
@@ -48,8 +48,12 @@ class Api:
             "data_dir": str(self._dossier),
         }
 
-    def get_state(self, dernier_id_journal: int = 0) -> dict:
+    def get_state(self, dernier_id_journal: int = 0, dernier_point_courbe: int = -1) -> dict:
         etat = self._engine.snapshot()
+        # Courbe : renvoyée seulement si elle a changé (évite d'envoyer ~600 points à chaque appel)
+        courbe = etat.get("pnl_curve") or []
+        if courbe and courbe[-1][0] == dernier_point_courbe:
+            etat["pnl_curve"] = None
         s = self._store.get()
         etat["max_trades"] = s.max_trades_per_day
         etat["real_mode_enabled"] = s.real_mode_enabled

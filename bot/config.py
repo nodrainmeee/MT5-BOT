@@ -36,8 +36,9 @@ SYMBOLES_DISPONIBLES = ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD"]
 RISQUE_PAR_TRADE_MAX = 2.0      # % du capital par trade
 PERTE_JOUR_MAX = 10.0           # % du capital par jour
 TRADES_JOUR_MAX = 20            # nombre de trades par jour
-POSITIONS_TOTAL_MAX = 4         # positions ouvertes en même temps (tous symboles)
-POSITIONS_PAR_SYMBOLE = 1       # fixé : une seule position par symbole
+POSITIONS_TOTAL_MAX = 10        # positions ouvertes en même temps (tous symboles)
+POSITIONS_PAR_SYMBOLE = 1       # valeur par défaut du moteur de risque (réglable : max_positions_per_symbol)
+POSITIONS_SYMBOLE_MAX = 10      # plafond du réglage "positions par actif"
 # Mode "montants fixes" : plafond de la perte d'UN trade, en % du capital.
 # (Remplace le plafond de 2 % tant que ce mode est actif.)
 RISQUE_FIXE_MAX_PCT = 3.0
@@ -95,7 +96,8 @@ class Settings:
     daily_loss_max: float = 3.0           # % de perte du jour qui arrête le bot
     max_trades_per_day: int = 6           # trades maximum par jour
     pause_after_loss_min: int = 10        # pause (minutes) après un trade perdant
-    max_total_positions: int = 2          # positions simultanées, tous symboles
+    max_total_positions: int = 6          # positions simultanées, tous symboles
+    max_positions_per_symbol: int = 3     # positions simultanées sur un même actif
 
     # --- Plage horaire (heure de Paris) ---
     session_start: str = "09:00"
@@ -112,7 +114,7 @@ class Settings:
     # --- Mode "montants fixes" (en devise du compte, ex. dollars) ---
     # Le TP et le SL de chaque trade sont posés pour gagner / perdre ces montants.
     fixed_money_mode: bool = True
-    fixed_tp_money: float = 0.50          # gain visé par trade
+    fixed_tp_money: float = 0.10          # gain visé par trade
     fixed_sl_money: float = 0.70          # perte maximale par trade
 
     # --- Pause "annonces économiques" (manuelle) ---
@@ -173,6 +175,7 @@ class Settings:
         borne("max_trades_per_day", 1, TRADES_JOUR_MAX, int)
         borne("pause_after_loss_min", 0, 240, int)
         borne("max_total_positions", 1, POSITIONS_TOTAL_MAX, int)
+        borne("max_positions_per_symbol", 1, POSITIONS_SYMBOLE_MAX, int)
         borne("rsi_buy_max", 50, 95)
         borne("rsi_sell_min", 5, 50)
         borne("atr_sl_mult", 0.5, 5.0)

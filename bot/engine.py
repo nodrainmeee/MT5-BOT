@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 
 from .config import MAGIC_NUMBER, ConfigStore
 from .mt5_connector import DEAL_ENTRY_IN, MT5Connector
-from .risk import LotResult, RiskManager, compute_fixed_money, compute_lot
+from .risk import LotResult, RiskManager, can_add_to_symbol, compute_fixed_money, compute_lot
 from .strategy import (StrategyParams, adjust_distances, evaluate, in_session,
                        spread_is_abnormal)
 
@@ -31,6 +31,7 @@ except Exception:                      # secours : heure locale du PC
     PARIS = None
 
 INTERVALLE_BOUCLE = 3.0      # secondes entre deux vérifications
+INTERVALLE_REPOS = 10.0      # hors plage horaire et sans position ouverte (économise le processeur)
 NB_BOUGIES = 1000            # historique chargé (EMA 200 fiable)
 
 
@@ -52,6 +53,10 @@ class TradingEngine:
         self._warned: set = set()          # avertissements déjà affichés (anti-répétition)
         self._symbols: dict = {}           # "EURUSD" -> "EURUSDm"
         self._pnl_curve: list = []         # [[horodatage, résultat du jour], ...]
+        self._tickets_vus: set = set()     # tickets des positions au cycle précédent
+        self._deals_cache = None           # (réalisé du jour, nb de trades) mis en cache
+        self._deals_cache_ts = 0.0
+        self._deals_cache_jour = None
         self._state = self._etat_initial()
 
     # ================================================================ état partagé
@@ -167,7 +172,15 @@ class TradingEngine:
                                        "Les positions déjà ouvertes gardent leur stop loss.")
                     self._set(halt_message=self.risk.halt_reason)
                     break
-                reste = INTERVALLE_BOUCLE - (time.monotonic() - debut)
+                cadence = INTERVALLE_BOUCLE
+                try:
+                    sc = self.store.get()
+                    if (self._state.get("open_positions", 0) == 0
+                            and not in_session(maintenant_paris(), sc.session_start, sc.session_end)):
+                        cadence = INTERVALLE_REPOS
+                except Exception:
+                    pass
+                reste = cadence - (time.monotonic() - debut)
                 self._stop.wait(max(0.2, reste))
         except Exception as exc:
             self.journal.error(f"Erreur grave, bot arrêté : {exc}")
@@ -254,20 +267,31 @@ class TradingEngine:
         self._set(**{k: v for k, v in st.items() if k in self._state})
         now = maintenant_paris()
 
-        # ---- Chiffres du jour à partir de l'historique MT5 (fiable même après redémarrage)
-        debut_jour = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        debut_utc = debut_jour.astimezone(timezone.utc)
-        fin_utc = datetime.now(timezone.utc) + timedelta(days=1)
-        deals = self.connector.deals_between(debut_utc, fin_utc, MAGIC_NUMBER)
-        realise = sum(d.profit + d.commission + d.swap + getattr(d, "fee", 0.0) for d in deals)
-        nb_trades = sum(1 for d in deals if d.entry == DEAL_ENTRY_IN)
+        # ---- Positions ouvertes par le bot
+        positions = self.connector.positions(MAGIC_NUMBER)
+        tickets = {p.ticket for p in positions}
+
+        # ---- Chiffres du jour à partir de l'historique MT5 (fiable même après redémarrage).
+        # L'historique n'est relu que si les positions ont changé (ouverture/fermeture)
+        # ou toutes les 20 s : inutile de l'interroger toutes les 3 s.
+        mono = time.monotonic()
+        if (self._deals_cache is None or tickets != self._tickets_vus
+                or mono - self._deals_cache_ts > 20 or self._deals_cache_jour != now.date()):
+            debut_jour = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            debut_utc = debut_jour.astimezone(timezone.utc)
+            fin_utc = datetime.now(timezone.utc) + timedelta(days=1)
+            deals = self.connector.deals_between(debut_utc, fin_utc, MAGIC_NUMBER)
+            realise = sum(d.profit + d.commission + d.swap + getattr(d, "fee", 0.0) for d in deals)
+            nb_trades = sum(1 for d in deals if d.entry == DEAL_ENTRY_IN)
+            self._deals_cache = (realise, nb_trades)
+            self._deals_cache_ts, self._deals_cache_jour = mono, now.date()
+        realise, nb_trades = self._deals_cache
+        self._tickets_vus = tickets
         if self.risk.sync(now.date(), st["balance"] or 0.0, realise, nb_trades):
             self._pnl_curve = []
             self._warned.discard("pause")
 
-        # ---- Positions et détection des fermetures (TP/SL)
-        positions = self.connector.positions(MAGIC_NUMBER)
-        tickets = {p.ticket for p in positions}
+        # ---- Détection des fermetures (TP/SL)
         for ticket in list(self._known_positions):
             if ticket not in tickets:
                 self._on_position_closed(ticket, self._known_positions.pop(ticket), s, now)
@@ -298,8 +322,11 @@ class TradingEngine:
 
         # ---- Analyse de chaque actif coché
         par_symbole = {}
+        ouvertes = {}      # symbole -> [(sens, profit flottant, volume)]
         for p in positions:
             par_symbole[p.symbol] = par_symbole.get(p.symbol, 0) + 1
+            ouvertes.setdefault(p.symbol, []).append(
+                ("BUY" if p.type == 0 else "SELL", float(p.profit), float(p.volume)))
         for base, on in s.symbols.items():
             if not on or self._stop.is_set():
                 continue
@@ -308,7 +335,7 @@ class TradingEngine:
                 self._warn_once(f"sym-{base}", f"{base} introuvable chez ce broker.")
                 continue
             self._symbols[base] = nom
-            if self._process_symbol(base, nom, s, now, par_symbole, len(positions)):
+            if self._process_symbol(base, nom, s, now, par_symbole, len(positions), ouvertes):
                 par_symbole[nom] = par_symbole.get(nom, 0) + 1
                 positions = positions + [None]   # compte la nouvelle position
 
@@ -332,15 +359,20 @@ class TradingEngine:
             self.journal.info(f"Pause de {s.pause_after_loss_min} min après ce trade perdant.")
 
     # ================================================================ un symbole
-    def _process_symbol(self, base, nom, s, now, par_symbole, total_positions) -> bool:
+    def _process_symbol(self, base, nom, s, now, par_symbole, total_positions, ouvertes) -> bool:
         """Analyse un symbole. Renvoie True si un ordre a été ouvert."""
+        # Lecture légère (1 bougie) : on ne recharge les 1000 bougies que s'il y a une nouvelle bougie
+        derniere = self.connector.last_closed_bar_time(nom, s.timeframe)
+        if derniere is None:
+            self._warn_once(f"rates-{nom}", f"{nom} : historique indisponible pour le moment.")
+            return False
+        if self._last_bar.get(nom) == derniere:
+            return False                    # bougie déjà analysée : on attend la suivante
         rates = self.connector.get_closed_rates(nom, s.timeframe, NB_BOUGIES)
         if rates is None:
             self._warn_once(f"rates-{nom}", f"{nom} : historique indisponible pour le moment.")
             return False
         derniere = rates["time"].iloc[-1]
-        if self._last_bar.get(nom) == derniere:
-            return False                    # bougie déjà analysée : on attend la suivante
         premiere_fois = nom not in self._last_bar
         self._last_bar[nom] = derniere
         if premiere_fois:
@@ -378,7 +410,8 @@ class TradingEngine:
 
         # ---- Règles de risque
         ok, raison = self.risk.can_open(nom, now, par_symbole, total_positions,
-                                        s.max_trades_per_day, s.max_total_positions)
+                                        s.max_trades_per_day, s.max_total_positions,
+                                        s.max_positions_per_symbol)
         if not ok:
             self.journal.info(f"{nom} : signal ignoré, {raison}")
             return False
@@ -392,6 +425,14 @@ class TradingEngine:
         entree = t.ask if d.action == "BUY" else t.bid
         sl_prix = entree - sl_dist if d.action == "BUY" else entree + sl_dist
         perte_lot = self.connector.loss_per_lot(nom, d.action, entree, sl_prix)
+        # ---- Plusieurs positions sur le même actif : même sens, pas de moyenne à la baisse
+        existantes = ouvertes.get(nom, [])
+        if existantes:
+            unite_spread = (perte_lot / sl_dist if sl_dist > 0 else 0.0) * (t.ask - t.bid)
+            ok, raison = can_add_to_symbol(d.action, existantes, unite_spread)
+            if not ok:
+                self.journal.info(f"{nom} : signal ignoré, {raison}")
+                return False
         # Capital de référence = le plus petit entre solde et équité (prudence)
         solde = float(self._state.get("balance") or 0.0)
         equite = float(self._state.get("equity") or solde)
@@ -399,7 +440,8 @@ class TradingEngine:
         if s.fixed_money_mode:
             # Montants fixes : TP = +fixed_tp_money, SL = -fixed_sl_money (posés chez le broker)
             ok, raison = self.risk.can_risk_amount(float(self._state.get("daily_pnl") or 0.0),
-                                                   s.fixed_sl_money, s.daily_loss_max)
+                                                   s.fixed_sl_money * (total_positions + 1),
+                                                   s.daily_loss_max)
             if not ok:
                 self.journal.info(f"{nom} : signal ignoré, {raison}")
                 return False
@@ -429,6 +471,7 @@ class TradingEngine:
             self.journal.error(f"{nom} : {sens} refusé. {msg}")
             return False
         self.risk.trades_today += 1
+        ouvertes.setdefault(nom, []).append((d.action, 0.0, float(req["volume"])))
         self.journal.success(
             f"{nom} : {sens} {req['volume']:g} lot à {req['price']} | SL {req['sl']} | "
             f"TP {req['tp']} | risque ≈ {lot.risk_amount:.2f} ({lot.risk_pct:.2f} %)"
