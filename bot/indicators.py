@@ -54,4 +54,6 @@ def add_indicators(df: pd.DataFrame, trend_period: int = 200) -> pd.DataFrame:
     out["ema_trend"] = ema(out["close"], int(trend_period))
     out["rsi"] = rsi(out["close"], 14)
     out["atr"] = atr(out["high"], out["low"], out["close"], 14)
+    # Volatilité "normale" = moyenne de l'ATR des 50 bougies PRÉCÉDENTES (sert au filtre de volatilité)
+    out["atr_avg"] = out["atr"].rolling(50, min_periods=10).mean().shift(1)
     return out

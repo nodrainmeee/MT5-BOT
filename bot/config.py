@@ -117,6 +117,18 @@ class Settings:
     fixed_tp_money: float = 0.10          # gain visé par trade
     fixed_sl_money: float = 0.70          # perte maximale par trade
 
+    # --- Règles propres au marché Forex ---
+    close_before_rollover: bool = True    # tout fermer avant le rollover (swap, spreads élargis, week-end)
+    rollover_close_time: str = "21:30"    # heure de Paris
+    friday_last_entry: str = "17:00"      # vendredi : plus de nouvelle position après (vide = désactivé)
+    news_blackout: bool = True            # pas d'entrée pendant les annonces économiques
+    news_calendar_online: bool = True     # utiliser le calendrier en ligne (sinon horaires fixes US)
+    news_impact: str = "High"             # impact minimal : "High" ou "Medium"
+    news_margin_min: int = 15             # minutes d'arrêt avant ET après chaque annonce
+    min_atr_spread_ratio: float = 4.0     # volatilité minimale = 4 x le spread (0 = désactivé)
+    atr_spike_max: float = 3.0            # volatilité maximale = 3 x la normale (0 = désactivé)
+    max_consecutive_losses: int = 4       # arrêt du jour après N pertes d'affilée
+
     # --- Pause "annonces économiques" (manuelle) ---
     news_pause_min: int = 30
 
@@ -124,6 +136,9 @@ class Settings:
     real_mode_enabled: bool = False
 
     # --- Interface ---
+    sound_enabled: bool = True            # sons du bot (ouverture, gain, perte, alerte)
+    sound_volume: int = 70                # volume des sons, 0 à 100
+    settings_version: int = 2             # sert à mettre à jour d'anciens fichiers de réglages
     theme: str = "dark"                   # "dark" ou "light"
 
     # --- Connexion MT5 (PAS de mot de passe ici !) ---
@@ -182,6 +197,24 @@ class Settings:
         borne("reward_risk", 1.0, 5.0)          # ratio 1:1 minimum imposé
         borne("spread_factor_max", 1.2, 5.0)
         borne("news_pause_min", 5, 240, int)
+        borne("min_atr_spread_ratio", 0.0, 50.0)
+        borne("atr_spike_max", 0.0, 20.0)
+        borne("max_consecutive_losses", 1, 20, int)
+        self.close_before_rollover = bool(self.close_before_rollover)
+        self.sound_enabled = bool(self.sound_enabled)
+        borne("sound_volume", 0, 100, int)
+        self.news_blackout = bool(self.news_blackout)
+        self.news_calendar_online = bool(self.news_calendar_online)
+        if self.news_impact not in ("High", "Medium"):
+            self.news_impact = "High"
+        borne("news_margin_min", 5, 60, int)
+        if parse_hhmm(self.rollover_close_time) is None:
+            notes.append("rollover_close_time : format HH:MM attendu, remis à 21:30")
+            self.rollover_close_time = "21:30"
+        if self.friday_last_entry and parse_hhmm(self.friday_last_entry) is None:
+            notes.append("friday_last_entry : format HH:MM attendu, remis à 17:00")
+            self.friday_last_entry = "17:00"
+        self.friday_last_entry = str(self.friday_last_entry or "")
         borne("fixed_tp_money", 0.05, 1000.0)
         borne("fixed_sl_money", 0.05, 1000.0)
         self.fixed_money_mode = bool(self.fixed_money_mode)
@@ -248,6 +281,17 @@ class ConfigStore:
         if self.path.exists():
             try:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
+                if int(data.get("settings_version", 1)) < 2:
+                    # Ancien fichier de réglages : le nouveau défaut (gain fixe +0,10,
+                    # plusieurs positions par actif) ne s'appliquerait jamais car l'ancienne
+                    # valeur est enregistrée. On applique donc ces nouvelles règles UNE fois.
+                    data.update(fixed_money_mode=True, fixed_tp_money=0.10, fixed_sl_money=0.70,
+                                max_positions_per_symbol=3, max_total_positions=6,
+                                settings_version=2)
+                    reglages = Settings.from_dict(data)
+                    self._settings = reglages
+                    self._save()
+                    return reglages
                 return Settings.from_dict(data)
             except (OSError, ValueError):
                 # Fichier abîmé : on repart des valeurs par défaut (sans planter)

@@ -25,6 +25,10 @@ CHAMPS_MODIFIABLES = {
     "trend_ema", "rsi_buy_max", "rsi_sell_min", "atr_sl_mult", "reward_risk",
     "spread_factor_max", "news_pause_min",
     "fixed_money_mode", "fixed_tp_money", "fixed_sl_money",
+    "close_before_rollover", "rollover_close_time", "friday_last_entry", "news_blackout",
+    "news_calendar_online", "news_impact", "news_margin_min",
+    "sound_enabled", "sound_volume",
+    "min_atr_spread_ratio", "atr_spike_max", "max_consecutive_losses",
 }
 
 
@@ -116,6 +120,17 @@ class Api:
     def stop_bot(self) -> dict:
         self._engine.stop()
         return {"ok": True}
+
+    def test_sound(self, volume: int = -1) -> dict:
+        """Bouton « Tester les sons » : joue tous les sons au volume demandé."""
+        vol = None
+        try:
+            if int(volume) >= 0:
+                vol = max(0, min(100, int(volume)))
+        except (TypeError, ValueError):
+            pass
+        disponible = self._engine.sounds.available
+        return {"ok": bool(self._engine.sounds.test(vol)), "available": disponible}
 
     def emergency_stop(self) -> dict:
         self._journal.error("ARRÊT D'URGENCE demandé.")

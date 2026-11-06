@@ -93,6 +93,7 @@
 
       <div id="pause-banner" class="notice warn" role="status" hidden></div>
       <div id="halt-banner" class="notice danger" role="alert" hidden></div>
+      <p id="next-news" class="small" hidden></p>
 
       <article class="glass card chart-card">
         <header class="card-head">
@@ -265,6 +266,75 @@
               </div>
             </div>
             <p class="help">Le take profit et le stop loss sont posés chez le broker à l'ouverture. Plafond : 3 % du capital par trade.</p>
+          </fieldset>
+
+          <fieldset class="field">
+            <legend>Règles du marché Forex</legend>
+            <label><input id="s-rollover-on" type="checkbox" data-key="close_before_rollover"> Tout fermer avant le rollover (pas de swap ni de spread élargi la nuit)</label>
+            <div class="grid-2">
+              <div class="field">
+                <label for="s-rollover">Heure de fermeture (Paris)</label>
+                <input id="s-rollover" type="time" data-key="rollover_close_time">
+                <p class="field-error"></p>
+              </div>
+              <div class="field">
+                <label for="s-friday">Vendredi : dernière entrée</label>
+                <input id="s-friday" type="time" data-key="friday_last_entry">
+                <p class="field-error"></p>
+              </div>
+            </div>
+            <label><input id="s-news-on" type="checkbox" data-key="news_blackout"> Pas d'entrée autour des annonces économiques importantes</label>
+            <label><input id="s-news-online" type="checkbox" data-key="news_calendar_online"> Utiliser le calendrier en ligne (sinon : horaires fixes des annonces américaines)</label>
+            <div class="grid-2">
+              <div class="field">
+                <label for="s-news-impact">Impact minimal</label>
+                <select id="s-news-impact" data-key="news_impact">
+                  <option value="High">Fort (rouge)</option>
+                  <option value="Medium">Moyen et fort</option>
+                </select>
+                <p class="field-error"></p>
+              </div>
+              <div class="field">
+                <label for="s-news-margin">Arrêt avant et après (min)</label>
+                <input id="s-news-margin" type="number" step="5" min="5" max="60" data-key="news_margin_min">
+                <p class="field-error"></p>
+              </div>
+            </div>
+            <div class="grid-2">
+              <div class="field">
+                <label for="s-atr-min">Volatilité min. (x le spread, 0 = off)</label>
+                <input id="s-atr-min" type="number" step="0.5" min="0" max="50" data-key="min_atr_spread_ratio">
+                <p class="field-error"></p>
+              </div>
+              <div class="field">
+                <label for="s-atr-max">Volatilité max. (x la normale, 0 = off)</label>
+                <input id="s-atr-max" type="number" step="0.5" min="0" max="20" data-key="atr_spike_max">
+                <p class="field-error"></p>
+              </div>
+            </div>
+            <div class="field">
+              <label for="s-streak">Arrêt du jour après N pertes d'affilée</label>
+              <input id="s-streak" type="number" step="1" min="1" max="20" data-key="max_consecutive_losses">
+              <p class="field-error"></p>
+            </div>
+            <p class="help">Règles pensées pour le Forex : les annonces américaines, le rollover de 23h (Paris) et les écarts du week-end sont les moments où un petit stop loss est le plus exposé.</p>
+          </fieldset>
+
+          <fieldset class="field">
+            <legend>Sons</legend>
+            <label><input id="s-sound-on" type="checkbox" data-key="sound_enabled"> Activer les sons (ouverture, gain, perte, alerte)</label>
+            <div class="grid-2">
+              <div class="field">
+                <label for="s-volume">Volume (0 à 100)</label>
+                <input id="s-volume" type="number" step="10" min="0" max="100" data-key="sound_volume">
+                <p class="field-error"></p>
+              </div>
+              <div class="field">
+                <label>&nbsp;</label>
+                <button class="btn btn-ghost btn-sm" id="btn-sound-test" type="button">Tester les sons</button>
+              </div>
+            </div>
+            <p class="help">Deux notes qui montent = position ouverte, trois notes qui montent = gain, deux notes qui descendent = perte, trois bips graves = alerte ou arrêt.</p>
           </fieldset>
 
           <details class="advanced">

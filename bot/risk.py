@@ -153,6 +153,17 @@ def can_add_to_symbol(action: str, existantes: list, cout_spread_par_lot: float,
     return True, "OK"
 
 
+def loss_streak(resultats: list) -> int:
+    """Nombre de pertes consécutives à la fin d'une liste de résultats (du plus ancien au plus récent)."""
+    n = 0
+    for r in reversed(resultats):
+        if r < 0:
+            n += 1
+        else:
+            break
+    return n
+
+
 class RiskManager:
     """Garde en mémoire l'état du jour : trades, pertes, pauses, arrêt."""
 
@@ -202,6 +213,15 @@ class RiskManager:
                 self.halted = True
                 self.halt_reason = (f"Perte maximale du jour atteinte ({pct:.2f} % "
                                     f"pour une limite de -{abs(perte_max_pct):g} %)")
+            return True
+        return False
+
+    def check_loss_streak(self, serie: int, max_pertes: int) -> bool:
+        """Arrêt pour la journée après 'max_pertes' pertes d'affilée. Renvoie True si arrêt."""
+        if serie >= int(max_pertes):
+            if not self.halted:
+                self.halted = True
+                self.halt_reason = f"{serie} pertes d'affilée (limite {int(max_pertes)})"
             return True
         return False
 

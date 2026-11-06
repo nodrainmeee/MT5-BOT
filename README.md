@@ -174,6 +174,7 @@ qui rapporte **0,10** et un stop loss qui coûte au maximum **0,70** (montants m
 du compte). Le bot calcule les distances en pips à partir du lot et les pose chez le broker : la
 fermeture est automatique, même si le PC s'éteint.
 
+- Sécurité en plus du take profit : dès qu'une position affiche un gain d'au moins le gain visé, le bot la ferme au marché.
 - Plafond de sécurité : la perte fixe ne peut pas dépasser **3 % du capital** par position.
 - Avec 0,01 lot sur EURUSD, 0,10 = environ 1 pip. Si le spread est de 1 pip ou plus, le bot
   **refuse** le trade (le take profit serait plus proche que le minimum autorisé). C'est normal.
@@ -185,10 +186,50 @@ fermeture est automatique, même si le PC s'éteint.
 ### Plusieurs positions sur un même actif
 
 Réglages **Positions par actif** (défaut 3) et **Positions simultanées (total)** (défaut 6).
-Garde-fous : toutes les positions d'un même actif doivent être **dans le même sens** (pas d'achat
+Un ancien fichier de réglages est mis à jour automatiquement au premier lancement (gain +0,10, 3 positions par actif, 6 au total). Garde-fous : toutes les positions d'un même actif doivent être **dans le même sens** (pas d'achat
 et de vente en même temps), et le bot n'en ajoute pas si une position de cet actif est en perte
 au-delà du coût normal du spread (**pas de moyenne à la baisse**). Une nouvelle position au plus
 par bougie et par actif.
+
+### Règles du marché Forex (activées par défaut, réglables)
+
+| Règle | Pourquoi |
+|---|---|
+| **Tout est fermé à 21h30** (Paris) | Le rollover (23h Paris) apporte du swap et des spreads élargis ; le week-end peut faire des écarts (gaps). Le bot ne garde rien la nuit. |
+| **Vendredi : plus d'entrée après 17h00** | Évite les positions ouvertes en fin de semaine, quand la liquidité baisse. |
+| **Pas d'entrée aux annonces américaines** (13h25-13h45 et 14h25-14h45) | Ces annonces (emploi, inflation…) font bouger le dollar d'un coup : un SL de 7 pips y est très exposé. |
+| **Volatilité minimale = 4 × le spread** | Si le marché est trop calme, le spread mange un gain de quelques pips. |
+| **Volatilité maximale = 3 × la normale** | Un choc de prix ou une annonce imprévue : on reste à l'écart. |
+| **Arrêt du jour après 4 pertes d'affilée** | Un marché qui ne répond pas à la stratégie ce jour-là. |
+| **Pause qui s'allonge** après une perte | 10 min, puis 20, puis 30 min à partir de la 3e perte d'affilée. |
+
+**Calendrier économique en ligne** (réglable) : le bot lit le flux public gratuit du calendrier ForexFactory
+(`nfs.faireconomy.media`), le recharge en arrière-plan toutes les 6 h et le garde sur le disque.
+- Il ne cible que les devises du symbole (EURUSD : annonces EUR et USD) et l'impact choisi (fort par défaut).
+- Il n'ouvre rien de 15 min avant à 15 min après chaque annonce, et **ferme les positions concernées 3 min avant**.
+- La prochaine annonce importante s'affiche dans la fenêtre.
+- Flux non officiel : s'il est indisponible (hors ligne, changement de format, limite), le bot utilise les
+  horaires fixes des annonces américaines et l'écrit dans le journal.
+- Le backtest, lui, ne peut utiliser que les horaires fixes (le flux ne couvre que la semaine en cours).
+
+Le backtest applique les mêmes règles ; `--sans-regles-forex` les désactive pour comparer.
+
+### Sons
+
+Le bot joue un son à chaque événement important (réglage « Sons », activé par défaut, volume 0 à 100,
+bouton « Tester les sons ») :
+
+| Son | Événement |
+|---|---|
+| 2 notes qui montent | position ouverte |
+| 3 notes qui montent | position fermée en **gain** |
+| 2 notes qui descendent | position fermée en **perte** |
+| 3 bips graves | erreur, arrêt du jour, arrêt d'urgence (au plus un toutes les 20 s) |
+| 1 note | bot démarré / arrêté |
+
+Les sons sont fabriqués par le logiciel (aucun fichier audio) et joués dans un fil séparé : ils ne ralentissent
+jamais le bot. Sans carte son (serveur distant, VPS sans audio), rien n'est joué et il n'y a aucune erreur.
+Si tu n'entends rien : vérifie le volume Windows, la sortie audio par défaut et que « Sons » est coché.
 
 ### Performances (PC ancien : Core i7 4e génération, 4 Go de RAM)
 

@@ -287,6 +287,9 @@ function render(s) {
   const pause = $("#pause-banner");
   pause.hidden = !s.pause_message;
   pause.textContent = s.pause_message || "";
+  const prochaine = $("#next-news");
+  prochaine.hidden = !s.next_news;
+  prochaine.textContent = s.next_news ? "Prochaine annonce importante : " + s.next_news : "";
   const halt = $("#halt-banner");
   halt.hidden = !s.halt_message;
   halt.textContent = s.halt_message ? s.halt_message + ". Le bot est arrêté pour aujourd'hui." : "";
@@ -432,6 +435,12 @@ function bindEvents() {
     toast(`Pause de ${r.minutes} min activée`);
   });
   $("#btn-resume").addEventListener("click", () => call("resume"));
+  $("#btn-sound-test").addEventListener("click", async () => {
+    const v = parseInt($("#s-volume").value, 10);
+    const r = await call("test_sound", Number.isNaN(v) ? -1 : v);
+    if (r && r.available) toast("Test des sons en cours…", "success");
+    else toast("Aucune sortie audio utilisable sur cet ordinateur.", "error");
+  });
   $("#btn-folder").addEventListener("click", () => call("open_data_folder"));
   $("#btn-export").addEventListener("click", async () => {
     const r = await call("export_trades_csv");

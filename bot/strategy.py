@@ -53,6 +53,7 @@ class Decision:
     sl_distance: float = 0.0    # distance du stop loss, en prix
     tp_distance: float = 0.0    # distance du take profit, en prix
     atr: float = 0.0
+    atr_avg: float = 0.0        # volatilité normale (moyenne de l'ATR), 0 = inconnue
     rsi: float = 0.0
     is_filtered: bool = False   # True = il y avait un signal mais un filtre l'a bloqué
 
@@ -89,6 +90,7 @@ def decide_at(ind: pd.DataFrame, i: int, params: StrategyParams) -> Decision:
     achat = a_achat or b_achat
     vente = a_vente or b_vente
     rsi_v, atr_v = float(b.rsi), float(b.atr)
+    atr_moy = 0.0 if pd.isna(b.atr_avg) else float(b.atr_avg)
 
     if achat and vente:  # cas théorique (signaux contradictoires) : on s'abstient
         return Decision(None, reason="Signaux contradictoires, abstention",
@@ -112,7 +114,7 @@ def decide_at(ind: pd.DataFrame, i: int, params: StrategyParams) -> Decision:
     sl = atr_v * params.atr_sl_mult
     tp = sl * max(1.0, params.reward_risk)
     libelle = "Achat" if action == "BUY" else "Vente"
-    return Decision(action, signal=nom, sl_distance=sl, tp_distance=tp, atr=atr_v, rsi=rsi_v,
+    return Decision(action, signal=nom, sl_distance=sl, tp_distance=tp, atr=atr_v, atr_avg=atr_moy, rsi=rsi_v,
                     reason=f"{libelle} : signal {nom} (RSI {rsi_v:.1f})")
 
 
@@ -157,6 +159,65 @@ def spread_is_abnormal(spread_actuel: float, historique: list | pd.Series,
     if mediane <= 0 or math.isnan(mediane):
         return False, 0.0
     return spread_actuel > mediane * facteur_max, mediane
+
+
+# ---------------------------------------------------------------------------
+# Règles propres au marché Forex (communes au bot et au backtest)
+# ---------------------------------------------------------------------------
+# Annonces américaines (8h30 à New York) = 14h30 à Paris, ou 13h30 pendant les 2-3 semaines
+# par an où les États-Unis et l'Europe n'ont pas le même décalage horaire. Les fenêtres
+# couvrent les deux cas. Ce sont les annonces qui font le plus bouger les paires en dollar.
+FENETRES_ANNONCES = (("13:25", "13:45"), ("14:25", "14:45"))
+
+
+def _minutes(hhmm: str) -> int | None:
+    h = parse_hhmm(hhmm) if hhmm else None
+    return None if h is None else h[0] * 60 + h[1]
+
+
+def in_news_blackout(maintenant: datetime, fenetres=FENETRES_ANNONCES) -> bool:
+    """Vrai pendant une fenêtre d'annonces économiques américaines (heure de Paris, lun-ven)."""
+    if maintenant.weekday() >= 5:
+        return False
+    m = maintenant.hour * 60 + maintenant.minute
+    for debut, fin in fenetres:
+        if _minutes(debut) <= m < _minutes(fin):
+            return True
+    return False
+
+
+def friday_cutoff_reached(maintenant: datetime, hhmm: str) -> bool:
+    """Vendredi, à partir de l'heure donnée : plus de nouvelle position (risque de week-end)."""
+    limite = _minutes(hhmm)
+    if limite is None or maintenant.weekday() != 4:
+        return False
+    return maintenant.hour * 60 + maintenant.minute >= limite
+
+
+def past_close_time(maintenant: datetime, hhmm: str) -> bool:
+    """Vrai à partir de l'heure de fermeture de fin de journée (avant le rollover, lun-ven)."""
+    limite = _minutes(hhmm)
+    if limite is None or maintenant.weekday() >= 5:
+        return False
+    return maintenant.hour * 60 + maintenant.minute >= limite
+
+
+def market_is_tradable(atr: float, atr_moyen: float, spread: float,
+                       ratio_min: float, spike_max: float) -> tuple[bool, str]:
+    """Le marché bouge-t-il assez (mais pas trop) par rapport à ses coûts ?
+
+    - Trop calme : la volatilité (ATR) doit valoir au moins 'ratio_min' x le spread,
+      sinon le spread mange le gain. 0 = filtre désactivé.
+    - Trop agité : l'ATR dépasse 'spike_max' x sa valeur normale (annonce, choc) -> on
+      reste à l'écart. 0 = filtre désactivé.
+    """
+    if ratio_min > 0 and spread > 0 and atr < spread * ratio_min:
+        return False, (f"marché trop calme : volatilité {atr / spread:.1f} x le spread "
+                       f"(minimum {ratio_min:g} x)")
+    if spike_max > 0 and atr_moyen and atr_moyen > 0 and atr > atr_moyen * spike_max:
+        return False, (f"volatilité anormale : {atr / atr_moyen:.1f} x la normale "
+                       f"(maximum {spike_max:g} x)")
+    return True, "OK"
 
 
 def in_session(maintenant: datetime, debut: str, fin: str) -> bool:

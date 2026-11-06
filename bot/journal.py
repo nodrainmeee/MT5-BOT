@@ -31,6 +31,7 @@ class Journal:
         self._lock = threading.Lock()
         self._buffer: deque = deque(maxlen=500)   # 500 dernières lignes pour l'interface
         self._next_id = 1
+        self.on_error = None                      # fonction appelée à chaque erreur (son d'alerte)
 
         # --- Fichier texte ---
         self._logger = logging.getLogger("MonBot")
@@ -81,6 +82,11 @@ class Journal:
                 pass
         py_level = {"error": logging.ERROR, "warning": logging.WARNING}.get(level, logging.INFO)
         self._logger.log(py_level, message)
+        if level == "error" and self.on_error:
+            try:
+                self.on_error(message)
+            except Exception:
+                pass
 
     def info(self, m): self.log(m, "info")
     def success(self, m): self.log(m, "success")

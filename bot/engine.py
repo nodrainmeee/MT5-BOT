@@ -19,9 +19,14 @@ import traceback
 from datetime import datetime, timedelta, timezone
 
 from .config import MAGIC_NUMBER, ConfigStore
-from .mt5_connector import DEAL_ENTRY_IN, MT5Connector
-from .risk import LotResult, RiskManager, can_add_to_symbol, compute_fixed_money, compute_lot
-from .strategy import (StrategyParams, adjust_distances, evaluate, in_session,
+from .economic_calendar import NewsCalendar, currencies_for
+from .mt5_connector import (DEAL_ENTRY_IN, DEAL_ENTRY_INOUT, DEAL_ENTRY_OUT, DEAL_ENTRY_OUT_BY,
+                            MT5Connector)
+from .sounds import SoundPlayer
+from .risk import (LotResult, RiskManager, can_add_to_symbol, compute_fixed_money, compute_lot,
+                   loss_streak)
+from .strategy import (StrategyParams, adjust_distances, evaluate, friday_cutoff_reached,
+                       in_news_blackout, in_session, market_is_tradable, past_close_time,
                        spread_is_abnormal)
 
 try:
@@ -57,7 +62,14 @@ class TradingEngine:
         self._deals_cache = None           # (réalisé du jour, nb de trades) mis en cache
         self._deals_cache_ts = 0.0
         self._deals_cache_jour = None
+        self.calendar = NewsCalendar(journal.dossier, journal)
+        self.sounds = SoundPlayer(self._reglages_sons)
+        journal.on_error = lambda message: self.sounds.play("alert")
         self._state = self._etat_initial()
+
+    def _reglages_sons(self):
+        s = self.store.get()
+        return s.sound_enabled, s.sound_volume
 
     # ================================================================ état partagé
     @staticmethod
@@ -67,7 +79,7 @@ class TradingEngine:
                 "server": None, "balance": None, "equity": None, "currency": "",
                 "daily_pnl": 0.0, "daily_pnl_pct": 0.0, "trades_today": 0,
                 "open_positions": 0, "pause_message": "", "halt_message": "",
-                "symbols_resolved": {}}
+                "symbols_resolved": {}, "next_news": ""}
 
     def _set(self, **kw):
         with self._state_lock:
@@ -107,6 +119,7 @@ class TradingEngine:
             return
         self._stop.set()
         self.journal.info(f"Arrêt du bot : {raison}")
+        self.sounds.play("stop")
         if attendre and self._thread is not threading.current_thread():
             self._thread.join(timeout=15)
         self._set(running=False, starting=False)
@@ -158,6 +171,7 @@ class TradingEngine:
                 return
             self._set(running=True, starting=False)
             self.journal.success("Bot démarré. Analyse à chaque nouvelle bougie clôturée.")
+            self.sounds.play("start")
             while not self._stop.is_set():
                 debut = time.monotonic()
                 try:
@@ -248,6 +262,21 @@ class TradingEngine:
         if self._known_positions:
             self.journal.info(f"{len(self._known_positions)} position(s) du bot déjà ouverte(s), suivies.")
         self._last_bar = {}
+        if s.fixed_money_mode:
+            self.journal.info(f"Sortie en argent ACTIVE : chaque position se ferme à +{s.fixed_tp_money:.2f} "
+                              f"(perte max -{s.fixed_sl_money:.2f}), {s.max_positions_per_symbol} position(s) "
+                              f"max par actif, {s.max_total_positions} au total.")
+        regles = []
+        if s.close_before_rollover:
+            regles.append(f"tout fermé à {s.rollover_close_time}")
+        if s.friday_last_entry:
+            regles.append(f"vendredi : plus d'entrée après {s.friday_last_entry}")
+        if s.news_blackout:
+            regles.append("pause annonces US")
+        if s.min_atr_spread_ratio > 0 or s.atr_spike_max > 0:
+            regles.append("filtre de volatilité")
+        regles.append(f"arrêt après {s.max_consecutive_losses} pertes d'affilée")
+        self.journal.info("Règles Forex actives : " + ", ".join(regles) + ".")
         self.journal.info(f"Plage horaire : {s.session_start}-{s.session_end} (heure de Paris), "
                           f"unité de temps {s.timeframe}.")
         return True
@@ -283,9 +312,12 @@ class TradingEngine:
             deals = self.connector.deals_between(debut_utc, fin_utc, MAGIC_NUMBER)
             realise = sum(d.profit + d.commission + d.swap + getattr(d, "fee", 0.0) for d in deals)
             nb_trades = sum(1 for d in deals if d.entry == DEAL_ENTRY_IN)
-            self._deals_cache = (realise, nb_trades)
+            sorties = sorted((d for d in deals if d.entry in (DEAL_ENTRY_OUT, DEAL_ENTRY_INOUT, DEAL_ENTRY_OUT_BY)),
+                             key=lambda d: d.time)
+            serie = loss_streak([d.profit + d.commission + d.swap + getattr(d, "fee", 0.0) for d in sorties])
+            self._deals_cache = (realise, nb_trades, serie)
             self._deals_cache_ts, self._deals_cache_jour = mono, now.date()
-        realise, nb_trades = self._deals_cache
+        realise, nb_trades, serie = self._deals_cache
         self._tickets_vus = tickets
         if self.risk.sync(now.date(), st["balance"] or 0.0, realise, nb_trades):
             self._pnl_curve = []
@@ -297,6 +329,56 @@ class TradingEngine:
                 self._on_position_closed(ticket, self._known_positions.pop(ticket), s, now)
         for p in positions:
             self._known_positions.setdefault(p.ticket, self._pos_info(p))
+        # ---- Marché Forex : on ne garde rien pendant la nuit. Après l'heure choisie (21h30 par défaut),
+        # on ferme tout avant le rollover (23h à Paris) : pas de swap, pas de spread élargi, pas de
+        # risque d'écart (gap) à la réouverture ni sur le week-end.
+        if s.close_before_rollover and positions and past_close_time(now, s.rollover_close_time):
+            fermees = set()
+            for p in positions:
+                ok, msg = self.connector.close_position(p, MAGIC_NUMBER)
+                if ok:
+                    fermees.add(p.ticket)
+                    self.journal.warning(f"{p.symbol} #{p.ticket} : fermée avant le rollover "
+                                         f"(après {s.rollover_close_time}), résultat {p.profit + p.swap:+.2f}")
+                else:
+                    self._warn_once(f"flat-{p.ticket}", f"{p.symbol} #{p.ticket} : {msg}")
+            positions = [p for p in positions if p.ticket not in fermees]
+
+        # ---- Calendrier économique en ligne : rechargé en arrière-plan (jamais bloquant)
+        if s.news_blackout and s.news_calendar_online:
+            self.calendar.refresh_if_needed()
+            # Une grosse annonce arrive dans moins de 3 minutes : on ferme les positions concernées
+            if positions and self.calendar.available(now):
+                fermees = set()
+                for p in positions:
+                    prochaines = self.calendar.upcoming(now, 3, currencies_for([p.symbol]), s.news_impact)
+                    if not prochaines:
+                        continue
+                    ev = prochaines[0]
+                    ok, msg = self.connector.close_position(p, MAGIC_NUMBER)
+                    if ok:
+                        fermees.add(p.ticket)
+                        self.journal.warning(f"{p.symbol} #{p.ticket} : fermée avant l'annonce {ev.currency} "
+                                             f"« {ev.title} » ({ev.when.astimezone(now.tzinfo):%H:%M}), "
+                                             f"résultat {p.profit + p.swap:+.2f}")
+                    else:
+                        self._warn_once(f"news-{p.ticket}", f"{p.symbol} #{p.ticket} : {msg}")
+                positions = [p for p in positions if p.ticket not in fermees]
+
+        # ---- Gain fixe : dès qu'une position atteint le gain visé (ex. +0,10), on la ferme.
+        # Le take profit posé chez le broker le fait déjà ; ceci est une sécurité en plus
+        # (positions ouvertes avant un changement de réglage, glissement de prix...).
+        if s.fixed_money_mode and s.fixed_tp_money > 0:
+            for p in positions:
+                net = p.profit + p.swap
+                if net >= s.fixed_tp_money - 0.005:
+                    ok, msg = self.connector.close_position(p, MAGIC_NUMBER)
+                    if ok:
+                        self.journal.success(f"{p.symbol} #{p.ticket} : gain {net:+.2f} atteint "
+                                             f"(objectif +{s.fixed_tp_money:.2f}), position fermée.")
+                    else:
+                        self._warn_once(f"lock-{p.ticket}", f"{p.symbol} #{p.ticket} : {msg}")
+
         flottant = sum(p.profit + p.swap for p in positions)
 
         pnl = self.risk.daily_pnl(flottant)
@@ -309,10 +391,13 @@ class TradingEngine:
             pause = f"En pause jusqu'à {self.risk.pause_until:%H:%M} ({self.risk.pause_reason})"
         self._set(daily_pnl=round(pnl, 2), daily_pnl_pct=round(pct, 2),
                   trades_today=self.risk.trades_today, open_positions=len(positions),
-                  pause_message=pause)
+                  pause_message=pause, next_news=self._next_news_text(s, now))
 
         # ---- Perte maximale du jour : NON désactivable
         if self.risk.check_daily_loss(flottant, s.daily_loss_max):
+            return
+        # ---- Série de pertes : arrêt pour la journée (l'historique du jour est relu s'il change)
+        if self.risk.check_loss_streak(serie, s.max_consecutive_losses):
             return
 
         if not st["algo_trading"]:
@@ -339,6 +424,34 @@ class TradingEngine:
                 par_symbole[nom] = par_symbole.get(nom, 0) + 1
                 positions = positions + [None]   # compte la nouvelle position
 
+    def _news_blocked(self, nom: str, s, now) -> str | None:
+        """Raison du blocage si une annonce importante touche ce symbole, sinon None."""
+        if not s.news_blackout:
+            return None
+        if s.news_calendar_online and self.calendar.available(now):
+            ev = self.calendar.blackout(now, currencies_for([nom]), s.news_impact,
+                                        s.news_margin_min, s.news_margin_min)
+            if ev:
+                return (f"annonce {ev.currency} « {ev.title} » à {ev.when.astimezone(now.tzinfo):%H:%M} "
+                        f"(arrêt {s.news_margin_min} min avant et après)")
+            return None
+        # Calendrier indisponible (hors ligne...) : horaires fixes des annonces américaines
+        if in_news_blackout(now):
+            return "fenêtre d'annonces américaines (horaires fixes, calendrier indisponible)"
+        return None
+
+    def _next_news_text(self, s, now) -> str:
+        """Texte pour l'interface : la prochaine annonce importante (tous les actifs cochés)."""
+        if not (s.news_blackout and s.news_calendar_online and self.calendar.available(now)):
+            return ""
+        actifs = [b for b, on in s.symbols.items() if on]
+        ev = self.calendar.next_event(now, currencies_for(actifs), s.news_impact)
+        if not ev:
+            return ""
+        quand = ev.when.astimezone(now.tzinfo)
+        jour = ("lun", "mar", "mer", "jeu", "ven", "sam", "dim")[quand.weekday()]
+        return f"{jour} {quand:%H:%M} {ev.currency} {ev.title}"
+
     def _warn_once(self, cle: str, message: str):
         if cle not in self._warned:
             self._warned.add(cle)
@@ -354,9 +467,12 @@ class TradingEngine:
         self.journal.log(f"{info['symbol']} #{ticket} : {res['reason']}, résultat "
                          f"{profit:+.2f}", niveau)
         self.journal.record_trade_close(ticket, res["price"], profit, res["reason"])
+        self.sounds.play("win" if profit >= 0 else "loss")
         if profit < 0 and s.pause_after_loss_min > 0:
-            self.risk.register_loss(now, s.pause_after_loss_min)
-            self.journal.info(f"Pause de {s.pause_after_loss_min} min après ce trade perdant.")
+            serie = self._deals_cache[2] if self._deals_cache else 1
+            minutes = s.pause_after_loss_min * max(1, min(int(serie), 3))   # pause qui s'allonge
+            self.risk.register_loss(now, minutes)
+            self.journal.info(f"Pause de {minutes} min après ce trade perdant ({max(1, int(serie))} perte(s) d'affilée).")
 
     # ================================================================ un symbole
     def _process_symbol(self, base, nom, s, now, par_symbole, total_positions, ouvertes) -> bool:
@@ -393,6 +509,19 @@ class TradingEngine:
                               f"({s.session_start}-{s.session_end}, lun-ven)")
             return False
 
+        # ---- Règles du marché Forex : annonces américaines, vendredi soir, fin de journée
+        raison_news = self._news_blocked(nom, s, now)
+        if raison_news:
+            self.journal.info(f"{nom} : signal ignoré, {raison_news}")
+            return False
+        if friday_cutoff_reached(now, s.friday_last_entry):
+            self.journal.info(f"{nom} : signal ignoré, vendredi après {s.friday_last_entry} "
+                              "(risque de week-end)")
+            return False
+        if s.close_before_rollover and past_close_time(now, s.rollover_close_time):
+            self.journal.info(f"{nom} : signal ignoré, après {s.rollover_close_time} (fermeture avant le rollover)")
+            return False
+
         # ---- Filtre de spread
         info = self.connector.symbol_info(nom)
         t = self.connector.tick(nom)
@@ -406,6 +535,13 @@ class TradingEngine:
         if anormal:
             self.journal.info(f"{nom} : signal ignoré, spread trop élevé ({spread_pts:.0f} pts, "
                               f"normale {mediane:.0f} pts)")
+            return False
+
+        # ---- Volatilité : ni trop calme (le spread mangerait le gain), ni anormalement agitée
+        ok_m, pourquoi = market_is_tradable(d.atr, d.atr_avg, t.ask - t.bid,
+                                            s.min_atr_spread_ratio, s.atr_spike_max)
+        if not ok_m:
+            self.journal.info(f"{nom} : signal ignoré, {pourquoi}")
             return False
 
         # ---- Règles de risque
@@ -476,6 +612,7 @@ class TradingEngine:
             f"{nom} : {sens} {req['volume']:g} lot à {req['price']} | SL {req['sl']} | "
             f"TP {req['tp']} | risque ≈ {lot.risk_amount:.2f} ({lot.risk_pct:.2f} %)"
             + (f" | gain visé {s.fixed_tp_money:.2f}" if s.fixed_money_mode else ""))
+        self.sounds.play("open")
         self.journal.record_trade_open(req.get("ticket", 0), nom, d.action, req["volume"],
                                        req["price"], req["sl"], req["tp"], d.signal)
         return True
